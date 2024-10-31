@@ -85,6 +85,42 @@ Spectrum GPISMedium::evalTransmittance2(Point3d from, Point3d dest, MediumState 
     direction = normalize(direction);
     Ray ray{from, direction};
 
+    ray.timeMax = std::min(ray.timeMax, ray.timeMin + 200);
+    ray.timeMax = std::min((dest - from).length(), ray.timeMax);
+
+    double t = r.timeMin;
+    bool intersected = false;
+    do {
+        intersected = intersectGP(r, gpRealization, t, sampler);
+        if (t < r.timeMax) {
+            Point3d point = r.origin + t * r.direction;
+            Vec3d grad = gpRealization.sampleGradient(point, r.direction, sampler);
+            if (intersected) {
+                mRec->aniso = normalize(grad);
+                mRec->marchLength = t;
+                mRec->scatterPoint = point;
+            }
+            gpRealization.applyMemoryModel(r.direction, memoryModel);
+        }
+    } while (!intersected && r.timeMax - t > eps);
+    mRec->sigmaS = 1.;
+    mRec->sigmaA = 0.;
+    mRec->pdf = 1.;
+    mRec->tr = 1.;
+    mRec->needAniso = true;
+    return intersected;
+
+    return 1. - shadowed;
+}
+
+Spectrum GPISMedium::evalTransmittanceMean(Point3d from, Point3d dest, MediumState *mediumState) const {
+    Vec3d direction = (dest - from);
+    if (direction.length() < 1e-4) {
+        return 1.;
+    }
+    direction = normalize(direction);
+    Ray ray{from, direction};
+
     MediumSampleRecord sampleRecord{};
     sampleRecord.mediumState = mediumState;
 
@@ -130,7 +166,7 @@ bool GPISMedium::intersectGP(const Ray &ray, GPRealization &gpRealization, doubl
             points.data(), derivativeTypes.data(), nullptr, marchingNumSamplePoints, {}, EXPAND_GPREALIZATION_WITH_VALUE(gpRealization), sampler);
     }
     double lastV = gpRealization.values[0];
-    double lastT = ray.timeMin;;
+    double lastT = t;
     t = ts[0];
     for (int i = 1; i < marchingNumSamplePoints; ++i) {
         double curV = gpRealization.values[i];
@@ -145,5 +181,9 @@ bool GPISMedium::intersectGP(const Ray &ray, GPRealization &gpRealization, doubl
         lastV = curV;
         lastT = curT;
     }
+    return false;
+}
+
+bool GPISMedium::intersectMean(const Ray &ray, double &t) const {
     return false;
 }

@@ -87,6 +87,9 @@ Spectrum VolPathIntegrator::Li(const Ray &initialRay, std::shared_ptr<Scene> sce
                     misw = 1.0;
                 L += throughput * tr * evalLightRecord.f * misw;
             }
+            nBounces++;
+            if (nBounces > nPathLengthLimit || !itsOpt)
+                break;
         } else {
             if (medium) throughput *= mRec.tr / mRec.pdf;
 
@@ -113,7 +116,7 @@ Spectrum VolPathIntegrator::Li(const Ray &initialRay, std::shared_ptr<Scene> sce
 
             //* Direct Illumination
             for (int i = 0; i < nDirectLightSamples; ++i) {
-                PathIntegratorLocalRecord sampleLightRecord = sampleDirectLighting2(scene, its, ray,&mediumState);
+                PathIntegratorLocalRecord sampleLightRecord = sampleDirectLighting2(scene, its, ray, &mediumState);
                 PathIntegratorLocalRecord evalScatterRecord = evalScatter(its, ray, sampleLightRecord.wi);
 
                 if (!sampleLightRecord.f.isBlack()) {

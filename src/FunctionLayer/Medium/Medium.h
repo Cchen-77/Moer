@@ -21,7 +21,6 @@
 #include "FunctionLayer/GaussianProcess/GaussianProcess.h"
 
 #include <optional>
-
 struct MediumState {
     // mainly for gpis medium which need the sampler
     Sampler &sampler;
@@ -99,6 +98,8 @@ public:
     auto samplePhase(Vec3d wo, Point3d scatterPoint, Point2d sample) const {
         return mPhase->samplePhase(wo, scatterPoint, sample);
     }
+
+    virtual bool isGPIS() { return false; }
 
 protected:
     std::shared_ptr<PhaseFunction> mPhase;
