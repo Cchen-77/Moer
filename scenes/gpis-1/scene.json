@@ -8,7 +8,7 @@
     {
       "name" : "gpis-hard",
       "type" : "gpis",
-      "marching_num_sample_points":16,
+      "marching_num_sample_points":32,
       "marching_step_size": 10000,
       "gaussian_process":{
         "type":"std",
