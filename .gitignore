@@ -7,3 +7,4 @@ cmake-build*
 .idea
 ./doxygen-doc
 scenes/**/*.hdr
+scenes/**/results

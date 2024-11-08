@@ -76,8 +76,9 @@ void VolPathIntegratorGPIS::renderPerThread(const std::shared_ptr<Scene> &scene,
                     scene,
                     optInfo,
                     method);
-                // don't waste training samples
-                // film->deposit(pixelPosition, L);
+#if USE_TRAINING_SAMPLES
+                film->deposit(pixelPosition, L);
+#endif
 
                 /**
                  * @warning spp used in this for loop belongs to Integrator.
@@ -90,16 +91,16 @@ void VolPathIntegratorGPIS::renderPerThread(const std::shared_ptr<Scene> &scene,
             }
 
             // DEBUG
-            {
-                /* std::lock_guard guard(mutex);
-                 for (double t : optInfo.ts) {
-                     std::cout << t << " ";
-                 }
-                 if (optInfo.ts.size()) {
-                     std::cout << '\n';
-                     std::fflush(stdout);
-                 }*/
-            }
+            /*{
+                std::lock_guard guard(mutex);
+                for (double grad : optInfo.graidents) {
+                    std::cout << grad << " ";
+                }
+                if (optInfo.graidents.size()) {
+                    std::cout << '\n';
+                    std::fflush(stdout);
+                }
+            }*/
 
             optInfo.state = GPISOptimzationInfo::InfoState::OPTIMIZING;
             switch (method) {
@@ -181,6 +182,9 @@ Spectrum VolPathIntegratorGPIS::LiTraining(const Ray &initialRay, std::shared_pt
                         optInfo.sampleCount++;
                         optInfo.tSum += t;
                         optInfo.squaredTSum += t * t;
+                        double grad = dot(mRec.aniso, ray.direction);
+                        optInfo.gradientSum += grad;
+                        optInfo.squaredGraidentSum += grad * grad;
                         break;
                     }
                     case OptimizingMethod::THREE: {
@@ -348,27 +352,35 @@ Spectrum VolPathIntegratorGPIS::LiOptimized(const Ray &initialRay, std::shared_p
                         if (randFloat() < optInfo.sampleDistanceSuccessProb) {
                             double mean = optInfo.tSum / optInfo.sampleCount;
                             double sigma = fm::sqrt(optInfo.squaredTSum / optInfo.sampleCount - mean * mean);
-                            // kind of waste,we just need one sample actually
-                            double sample = rand_normal_2(*sampler)[0];
-                            sample = mean + sigma * sample;
 
-                            mRec.marchLength = sample;
-                            mRec.scatterPoint = ray.origin + ray.direction * sample;
+                            Vec2d sample = rand_normal_2(*sampler);
+                            mRec.marchLength = mean + sigma * sample[0];
+                            mRec.scatterPoint = ray.origin + ray.direction * mRec.marchLength;
 
-                            // need a extra pseudo marching point "mRec.scatterPoint - 0.01*ray.direction" to ensure normal outward
-                            Point3d intersection = mRec.scatterPoint;
-                            Point3d pseudoPoint = mRec.scatterPoint - 0.1 * ray.direction;
+#if (GPIS_SAMPLE_NORMAL_METHOD == 0)
+                            //we have statistic of ray direction gradient
+                            double rayGradMean = optInfo.gradientSum / optInfo.sampleCount;
+                            double rayGradSigma = fm::sqrt(optInfo.squaredGraidentSum / optInfo.sampleCount - rayGradMean * rayGradMean);
+                            double sampleRayDirGrad = rayGradMean + sample[1] * rayGradSigma;
+
                             std::shared_ptr<GaussianProcess> gp = static_cast<GPISMedium *>(medium.get())->getGP();
-                            std::vector<Point3d> points = {intersection, pseudoPoint};
-                            std::vector<DerivativeType> derivativeTypes = {DerivativeType::None, DerivativeType::None};
-                            std::vector<double> values = {0, gp->meanFunction->operator()(DerivativeType::None, pseudoPoint)};
+                            Point3d intersection = mRec.scatterPoint;
 
-                            mediumState.realization = GPRealization(gp.get(), points.data(), derivativeTypes.data(), nullptr, values.data(), 1, {});
+                            std::vector<Point3d> points = {intersection, intersection};
+                            std::vector<double> values = {0., sampleRayDirGrad};
+                            std::vector<DerivativeType> derivativeTypes = {DerivativeType::None, DerivativeType::First};
+
+                            mediumState.realization = GPRealization(gp.get(), points.data(), derivativeTypes.data(), nullptr, values.data(), points.size(), ray.direction);
+                            mediumState.realization.justIntersected = true;
+                            mRec.aniso = normalize(mediumState.realization.sampleGradient(intersection, ray.direction, *sampler));
+
+                            mediumState.realization.applyMemoryModel(ray.direction, MemoryModel::Renewal);
+#elif (GPIS_SAMPLE_NORMAL_METHOD == 1)
                             Frame frame(ray.direction);
                             mRec.aniso = normalize(frame.toWorld({gp->meanFunction->operator()(DerivativeType::First, pseudoPoint, frame.s),
                                                                   gp->meanFunction->operator()(DerivativeType::First, pseudoPoint, frame.t),
                                                                   gp->meanFunction->operator()(DerivativeType::First, pseudoPoint, frame.n)}));
-                            // mediumState.realization.applyMemoryModel(ray.direction, MemoryModel::RenewalPlus);
+#endif
                             sampleDistanceResult = true;
                         }
                         break;
@@ -396,7 +408,7 @@ Spectrum VolPathIntegratorGPIS::LiOptimized(const Ray &initialRay, std::shared_p
             }
             //* ----- Luminaire Sampling -----
             for (int i = 0; i < nDirectLightSamples; ++i) {
-                PathIntegratorLocalRecord sampleLightRecord = sampleDirectLighting2(scene, mediumScatteringPoint, ray, &mediumState);
+                PathIntegratorLocalRecord sampleLightRecord = sampleDirectLightingGPISOpt(scene, mediumScatteringPoint, ray, &mediumState);
                 PathIntegratorLocalRecord evalScatterRecord = evalScatter(mediumScatteringPoint, ray, sampleLightRecord.wi);
                 if (!sampleLightRecord.f.isBlack()) {
                     double misw = MISWeight(sampleLightRecord.pdf, evalScatterRecord.pdf);
@@ -414,7 +426,7 @@ Spectrum VolPathIntegratorGPIS::LiOptimized(const Ray &initialRay, std::shared_p
             throughput *= sampleScatterRecord.f / sampleScatterRecord.pdf;
             ray = Ray{mediumScatteringPoint.position + sampleScatterRecord.wi * eps, sampleScatterRecord.wi};
             itsOpt = scene->intersect(ray);
-            auto [sampleIts, tr] = intersectIgnoreSurface2(scene, ray, medium, &mediumState);
+            auto [sampleIts, tr] = intersectIgnoreSurfaceGPISOpt(scene, ray, medium, &mediumState);
             auto evalLightRecord = evalEmittance(scene, sampleIts, ray);
             if (!evalLightRecord.f.isBlack()) {
                 double misw = MISWeight(sampleScatterRecord.pdf, evalLightRecord.pdf);
@@ -451,7 +463,7 @@ Spectrum VolPathIntegratorGPIS::LiOptimized(const Ray &initialRay, std::shared_p
 
             //* Direct Illumination
             for (int i = 0; i < nDirectLightSamples; ++i) {
-                PathIntegratorLocalRecord sampleLightRecord = sampleDirectLighting2(scene, its, ray, &mediumState);
+                PathIntegratorLocalRecord sampleLightRecord = sampleDirectLightingGPISOpt(scene, its, ray, &mediumState);
                 PathIntegratorLocalRecord evalScatterRecord = evalScatter(its, ray, sampleLightRecord.wi);
 
                 if (!sampleLightRecord.f.isBlack()) {
@@ -474,7 +486,7 @@ Spectrum VolPathIntegratorGPIS::LiOptimized(const Ray &initialRay, std::shared_p
             ray = Ray{its.position + sampleScatterRecord.wi * eps, sampleScatterRecord.wi};
             itsOpt = scene->intersect(ray);
 
-            auto [sampleIts, tr] = intersectIgnoreSurface2(scene, ray, medium, &mediumState);
+            auto [sampleIts, tr] = intersectIgnoreSurfaceGPISOpt(scene, ray, medium, &mediumState);
 
             auto evalLightRecord = evalEmittance(scene, sampleIts, ray);
             if (!evalLightRecord.f.isBlack()) {
@@ -495,4 +507,142 @@ Spectrum VolPathIntegratorGPIS::LiOptimized(const Ray &initialRay, std::shared_p
     }
 
     return L;
+}
+
+Spectrum VolPathIntegratorGPIS::evalTransmittanceGPISOpt(std::shared_ptr<Scene> scene, const Intersection &its, Point3d pointOnLight, const MediumState *mediumState) const {
+#if ENABLE_GPIS_VISIBILITY_OPTIMIZATION
+    MediumState transientMeidumState = *mediumState;
+    float tmax = (pointOnLight - its.position).length();
+    Ray shadowRay{its.position, normalize(pointOnLight - its.position), 1e-4f, tmax - 1e-4f};
+    std::shared_ptr<Medium> medium = its.medium;
+    Spectrum tr(1.f);
+    while (true) {
+        auto itsOpt = scene->intersect(shadowRay);
+
+        if (medium) {
+            if (!itsOpt) {
+                if (!medium->isGPIS()) {
+                    tr *= medium->evalTransmittance2(shadowRay.origin, pointOnLight, &transientMeidumState);
+                } else {
+                    tr *= static_cast<GPISMedium *>(medium.get())->evalTransmittanceMean(shadowRay.origin, pointOnLight, &transientMeidumState);
+                }
+                break;
+            }
+
+            if (!itsOpt->material->getBxDF(*itsOpt)->isNull()) {
+                tr = .0f;
+                break;
+            }
+
+            if (!medium->isGPIS()) {
+                tr *= medium->evalTransmittance2(shadowRay.origin, pointOnLight, &transientMeidumState);
+            } else {
+                tr *= static_cast<GPISMedium *>(medium.get())->evalTransmittanceMean(shadowRay.origin, pointOnLight, &transientMeidumState);
+            }
+            medium = getTargetMedium(*itsOpt, shadowRay.direction);
+            transientMeidumState.reset();
+            shadowRay.origin = itsOpt->position;
+            shadowRay.timeMax -= itsOpt->t;
+        } else {
+            if (!itsOpt) break;
+
+            if (!itsOpt->material->getBxDF(*itsOpt)->isNull()) {
+                tr = .0f;
+                break;
+            }
+            medium = getTargetMedium(*itsOpt, shadowRay.direction);
+            transientMeidumState.reset();
+            shadowRay.origin = itsOpt->position;
+            shadowRay.timeMax -= itsOpt->t;
+        }
+    }
+
+    return tr;
+#else
+    return evalTransmittance2(scene, its, pointOnLight, mediumState);
+#endif
+}
+
+PathIntegratorLocalRecord VolPathIntegratorGPIS::sampleDirectLightingGPISOpt(std::shared_ptr<Scene> scene, const Intersection &its, const Ray &ray, const MediumState *mediumState) {
+#if ENABLE_GPIS_VISIBILITY_OPTIMIZATION
+    auto [light, pdfChooseLight] = chooseOneLight(scene, sampler->sample1D());
+    auto record = light->sampleDirect(its, sampler->sample2D(), ray.timeMin);
+    double pdfDirect = record.pdfDirect * pdfChooseLight;// pdfScatter with respect to solid angle
+    Vec3d dirScatter = record.wi;
+    Point3d posL = record.dst;
+    Point3d posS = its.position;
+    auto transmittance = evalTransmittanceGPISOpt(scene, its, record.dst, mediumState);
+    //    if (!its.material && transmittance.sum() < 2.9f) {
+    //        std::cout << transmittance.sum() << "\n";
+    //    }
+    return {dirScatter, transmittance * record.s, pdfDirect, record.isDeltaPos};
+#else
+    return sampleDirectLighting2(scene, its, ray, mediumState);
+#endif
+}
+
+std::pair<std::optional<Intersection>, Spectrum> VolPathIntegratorGPIS::intersectIgnoreSurfaceGPISOpt(std::shared_ptr<Scene> scene, const Ray &ray, std::shared_ptr<Medium> medium, const MediumState *mediumState) const {
+#if ENABLE_GPIS_VISIBILITY_OPTIMIZATION
+    MediumState transientMeidumState = *mediumState;
+
+    const double eps = 1e-5;
+    Vec3d dir = ray.direction;
+
+    Spectrum tr(1.0);
+    Ray marchRay{ray.origin + dir * eps, dir};
+    std::shared_ptr<Medium> currentMedium = medium;
+
+    Point3d lastScatteringPoint = ray.origin;
+    auto testRayItsOpt = scene->intersect(marchRay);
+
+    // calculate the transmittance of last segment from lastScatteringPoint to testRayItsOpt.
+    while (true) {
+
+        // corner case: infinite medium or infinite light source.
+        if (!testRayItsOpt.has_value()) {
+            if (currentMedium != nullptr)
+                tr = Spectrum(0.0);
+            return {testRayItsOpt, tr};
+        }
+
+        auto testRayIts = testRayItsOpt.value();
+
+        // corner case: non-null surface
+        if (testRayIts.material != nullptr) {
+            if (!testRayIts.material->getBxDF(testRayIts)->isNull()) {
+                if (currentMedium != nullptr) {
+                    if (!currentMedium->isGPIS()) {
+                        tr *= currentMedium->evalTransmittance2(testRayIts.position, lastScatteringPoint, &transientMeidumState);
+                    } else {
+                        tr *= static_cast<GPISMedium *>(currentMedium.get())->evalTransmittanceMean(testRayIts.position, lastScatteringPoint, &transientMeidumState);
+                    }
+                }
+                return {testRayItsOpt, tr};
+            }
+        }
+
+        // hit a null surface, calculate tr
+        if (currentMedium != nullptr) {
+            if (currentMedium != nullptr) {
+                if (!currentMedium->isGPIS()) {
+                    tr *= currentMedium->evalTransmittance2(testRayIts.position, lastScatteringPoint, &transientMeidumState);
+                } else {
+                    tr *= static_cast<GPISMedium *>(currentMedium.get())->evalTransmittanceMean(testRayIts.position, lastScatteringPoint, &transientMeidumState);
+                }
+            }
+        }
+
+        // update medium
+        currentMedium = getTargetMedium(testRayIts, dir);
+        transientMeidumState.reset();
+
+        // update ray and intersection point.
+        marchRay.origin = testRayIts.position + dir * eps;
+        lastScatteringPoint = testRayIts.position;
+        testRayItsOpt = scene->intersect(marchRay);
+    }
+    return {testRayItsOpt, tr};
+#else
+    return intersectIgnoreSurface2(scene, ray, medium, mediumState);
+#endif
 }

@@ -85,42 +85,6 @@ Spectrum GPISMedium::evalTransmittance2(Point3d from, Point3d dest, MediumState 
     direction = normalize(direction);
     Ray ray{from, direction};
 
-    ray.timeMax = std::min(ray.timeMax, ray.timeMin + 200);
-    ray.timeMax = std::min((dest - from).length(), ray.timeMax);
-
-    double t = r.timeMin;
-    bool intersected = false;
-    do {
-        intersected = intersectGP(r, gpRealization, t, sampler);
-        if (t < r.timeMax) {
-            Point3d point = r.origin + t * r.direction;
-            Vec3d grad = gpRealization.sampleGradient(point, r.direction, sampler);
-            if (intersected) {
-                mRec->aniso = normalize(grad);
-                mRec->marchLength = t;
-                mRec->scatterPoint = point;
-            }
-            gpRealization.applyMemoryModel(r.direction, memoryModel);
-        }
-    } while (!intersected && r.timeMax - t > eps);
-    mRec->sigmaS = 1.;
-    mRec->sigmaA = 0.;
-    mRec->pdf = 1.;
-    mRec->tr = 1.;
-    mRec->needAniso = true;
-    return intersected;
-
-    return 1. - shadowed;
-}
-
-Spectrum GPISMedium::evalTransmittanceMean(Point3d from, Point3d dest, MediumState *mediumState) const {
-    Vec3d direction = (dest - from);
-    if (direction.length() < 1e-4) {
-        return 1.;
-    }
-    direction = normalize(direction);
-    Ray ray{from, direction};
-
     MediumSampleRecord sampleRecord{};
     sampleRecord.mediumState = mediumState;
 
@@ -128,6 +92,23 @@ Spectrum GPISMedium::evalTransmittanceMean(Point3d from, Point3d dest, MediumSta
     its.t = (dest - from).length();
     bool shadowed = sampleDistance(&sampleRecord, ray, its, {});
 
+    return 1. - shadowed;
+}
+
+Spectrum GPISMedium::evalTransmittanceMean(Point3d from, Point3d dest, MediumState *mediumState) const {
+
+    Vec3d direction = (dest - from);
+    if (direction.length() < 1e-4) {
+        return 1.;
+    }
+    direction = normalize(direction);
+    Ray ray{from, direction};
+
+    ray.timeMax = std::min(ray.timeMax, ray.timeMin + 200);
+    ray.timeMax = std::min((dest - from).length(), ray.timeMax);
+
+    double t = ray.timeMin;
+    bool shadowed = intersectMean(ray, t);
     return 1. - shadowed;
 }
 
@@ -185,5 +166,29 @@ bool GPISMedium::intersectGP(const Ray &ray, GPRealization &gpRealization, doubl
 }
 
 bool GPISMedium::intersectMean(const Ray &ray, double &t) const {
+    double maxDistance = ray.timeMax - t;
+    double determinedStepSize = maxDistance / (marchingNumSamplePoints - 1);
+
+    if (marchingStepSize < determinedStepSize) {
+        determinedStepSize = marchingStepSize;
+    }
+    determinedStepSize = std::min(determinedStepSize, gaussianProcess->goodStepSize(ray.origin + ray.direction * t, ray.direction, marchingDesiredCov, determinedStepSize));
+
+    int sampleCount = std::ceil(maxDistance / determinedStepSize);
+
+    double lastV = gaussianProcess->meanFunction->operator()(DerivativeType::None, ray.origin + t * ray.direction);
+    double lastT = t;
+    for (int i = 1; i <= sampleCount; ++i) {
+        double curT = (i == sampleCount) ? ray.timeMax : (t + i * determinedStepSize);
+        double curV = gaussianProcess->meanFunction->operator()(DerivativeType::None, ray.origin + curT * ray.direction);
+        if (lastV * curV < 0 && lastV > 0) {
+            double offset = lastV / (lastV - curV);
+            t = lerp(lastT, curT, offset);
+            return true;
+        }
+        t = curT;
+        lastV = curV;
+        lastT = curT;
+    }
     return false;
 }
