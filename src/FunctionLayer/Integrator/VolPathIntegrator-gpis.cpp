@@ -524,7 +524,7 @@ Spectrum VolPathIntegratorGPIS::evalTransmittanceGPISOpt(std::shared_ptr<Scene> 
                 if (!medium->isGPIS()) {
                     tr *= medium->evalTransmittance2(shadowRay.origin, pointOnLight, &transientMeidumState);
                 } else {
-                    tr *= static_cast<GPISMedium *>(medium.get())->evalTransmittanceMean(shadowRay.origin, pointOnLight, &transientMeidumState);
+                    tr *= static_cast<GPISMedium *>(medium.get())->evalTransmittanceOpt(shadowRay.origin, pointOnLight, &transientMeidumState);
                 }
                 break;
             }
@@ -537,7 +537,7 @@ Spectrum VolPathIntegratorGPIS::evalTransmittanceGPISOpt(std::shared_ptr<Scene> 
             if (!medium->isGPIS()) {
                 tr *= medium->evalTransmittance2(shadowRay.origin, pointOnLight, &transientMeidumState);
             } else {
-                tr *= static_cast<GPISMedium *>(medium.get())->evalTransmittanceMean(shadowRay.origin, pointOnLight, &transientMeidumState);
+                tr *= static_cast<GPISMedium *>(medium.get())->evalTransmittanceOpt(shadowRay.origin, pointOnLight, &transientMeidumState);
             }
             medium = getTargetMedium(*itsOpt, shadowRay.direction);
             transientMeidumState.reset();
@@ -614,7 +614,7 @@ std::pair<std::optional<Intersection>, Spectrum> VolPathIntegratorGPIS::intersec
                     if (!currentMedium->isGPIS()) {
                         tr *= currentMedium->evalTransmittance2(testRayIts.position, lastScatteringPoint, &transientMeidumState);
                     } else {
-                        tr *= static_cast<GPISMedium *>(currentMedium.get())->evalTransmittanceMean(testRayIts.position, lastScatteringPoint, &transientMeidumState);
+                        tr *= static_cast<GPISMedium *>(currentMedium.get())->evalTransmittanceOpt(testRayIts.position, lastScatteringPoint, &transientMeidumState);
                     }
                 }
                 return {testRayItsOpt, tr};
@@ -627,7 +627,7 @@ std::pair<std::optional<Intersection>, Spectrum> VolPathIntegratorGPIS::intersec
                 if (!currentMedium->isGPIS()) {
                     tr *= currentMedium->evalTransmittance2(testRayIts.position, lastScatteringPoint, &transientMeidumState);
                 } else {
-                    tr *= static_cast<GPISMedium *>(currentMedium.get())->evalTransmittanceMean(testRayIts.position, lastScatteringPoint, &transientMeidumState);
+                    tr *= static_cast<GPISMedium *>(currentMedium.get())->evalTransmittanceOpt(testRayIts.position, lastScatteringPoint, &transientMeidumState);
                 }
             }
         }

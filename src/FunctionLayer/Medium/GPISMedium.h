@@ -20,7 +20,7 @@ public:
     virtual Spectrum evalTransmittance2(Point3d from,
                                         Point3d dest,
                                         MediumState *mediumState) const override;
-    Spectrum evalTransmittanceMean(Point3d from,
+    Spectrum evalTransmittanceOpt(Point3d from,
                                Point3d dest,
                                MediumState *meidumState) const;
 

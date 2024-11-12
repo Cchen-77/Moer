@@ -84,7 +84,7 @@ public:
                                   const MediumState *mediumState) const;
 
 protected:
-    const double trainingSPPFraction = 0.5;
+    const double trainingSPPFraction = 0.05;
     const int nPathLengthLimit = 1;
 
     std::mutex mutex;
