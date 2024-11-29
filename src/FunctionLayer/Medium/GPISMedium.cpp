@@ -86,11 +86,11 @@ Spectrum GPISMedium::evalTransmittance2(Point3d from, Point3d dest, MediumState 
     direction = normalize(direction);
     Ray ray{from, direction};
 
-    MediumSampleRecord sampleRecord{};
-    sampleRecord.mediumState = mediumState;
-
     Intersection its;
     its.t = (dest - from).length();
+
+    MediumSampleRecord sampleRecord{};
+    sampleRecord.mediumState = mediumState;
     bool shadowed = sampleDistance(&sampleRecord, ray, its, {});
 
     return 1. - shadowed;
@@ -118,7 +118,7 @@ Spectrum GPISMedium::evalTransmittanceOpt(Point3d from, Point3d dest, MediumStat
     }
     int sampleCount = std::ceil(maxDistance / determinedStepSize);
     std::vector<Point3d> points;
-    //nearby information is more important
+    // nearby information is more important
     points.push_back(ray.origin + ray.direction * 0.001 * determinedStepSize);
     points.push_back(ray.origin + ray.direction * 0.01 * determinedStepSize);
     points.push_back(ray.origin + ray.direction * 0.02 * determinedStepSize);

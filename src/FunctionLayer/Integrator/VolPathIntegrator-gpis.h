@@ -4,11 +4,12 @@
 
 // 0: sample normal from GP with only zero-crossing conditioning
 // 1: directly use the mean normal as gpis normal
+// 2: approximate normal distribution in training phase,and sample normal from that later.
 
-#define GPIS_SAMPLE_NORMAL_METHOD 0
+#define GPIS_SAMPLE_NORMAL_METHOD 2
 
 // whether to include the contribution of training samples in the final result
-#define USE_TRAINING_SAMPLES 1
+#define USE_TRAINING_SAMPLES 0
 
 class VolPathIntegratorGPIS : public VolPathIntegrator {
 public:
@@ -42,6 +43,10 @@ public:
         double squaredGraidentSum = 0.;
         int sampleCount = 0.;
         double sampleDistanceSuccessProb = 0.;
+
+        std::vector<Vec3d> normals;
+        Vec3d meanNormal = {};
+        double beckmannRoughness = 0.;
 
         // for debugging
         std::vector<double> ts;
@@ -84,7 +89,7 @@ public:
                                   const MediumState *mediumState) const;
 
 protected:
-    const double trainingSPPFraction = 0.05;
+    const double trainingSPPFraction = 0.5;
     const int nPathLengthLimit = 1;
 
     std::mutex mutex;

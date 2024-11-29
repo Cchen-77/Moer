@@ -10,6 +10,8 @@
 #include "FunctionLayer/GaussianProcess/GaussianProcess.h"
 #include "FunctionLayer/Medium/GPISMedium.h"
 
+#include "FunctionLayer/Material/BxDF/MicrofacetDistribution.h"
+
 VolPathIntegratorGPIS::VolPathIntegratorGPIS(std::shared_ptr<Camera> _camera,
                                              std::unique_ptr<Film> _film,
                                              std::unique_ptr<TileGenerator> _tileGenerator,
@@ -106,9 +108,23 @@ void VolPathIntegratorGPIS::renderPerThread(const std::shared_ptr<Scene> &scene,
             switch (method) {
                 case OptimizingMethod::ONE:
                     break;
-                case OptimizingMethod::TWO:
+                case OptimizingMethod::TWO: {
                     optInfo.sampleDistanceSuccessProb = 1. * optInfo.sampleCount / trainingSPP;
+#if (GPIS_SAMPLE_NORMAL_METHOD == 2)
+                    if (optInfo.sampleCount > 0) {
+                        optInfo.meanNormal /= optInfo.sampleCount;
+                        optInfo.meanNormal = normalize(optInfo.meanNormal);
+                        double slopeSpaceVariance = 0.;
+                        for (auto &normal : optInfo.normals) {
+                            double cos = dot(normal, optInfo.meanNormal);
+                            slopeSpaceVariance += 1. / (cos * cos) - 1.;
+                        }
+                        slopeSpaceVariance /= optInfo.sampleCount;
+                        optInfo.beckmannRoughness = fm::sqrt(2 * slopeSpaceVariance);
+                    }
+#endif
                     break;
+                }
                 case OptimizingMethod::THREE:
                     break;
                 default:
@@ -185,6 +201,10 @@ Spectrum VolPathIntegratorGPIS::LiTraining(const Ray &initialRay, std::shared_pt
                         double grad = dot(mRec.aniso, ray.direction);
                         optInfo.gradientSum += grad;
                         optInfo.squaredGraidentSum += grad * grad;
+#if (GPIS_SAMPLE_NORMAL_METHOD == 2)
+                        optInfo.meanNormal += mRec.aniso;
+                        optInfo.normals.push_back(mRec.aniso);
+#endif
                         break;
                     }
                     case OptimizingMethod::THREE: {
@@ -358,7 +378,7 @@ Spectrum VolPathIntegratorGPIS::LiOptimized(const Ray &initialRay, std::shared_p
                             mRec.scatterPoint = ray.origin + ray.direction * mRec.marchLength;
 
 #if (GPIS_SAMPLE_NORMAL_METHOD == 0)
-                            //we have statistic of ray direction gradient
+                            // we have statistic of ray direction gradient
                             double rayGradMean = optInfo.gradientSum / optInfo.sampleCount;
                             double rayGradSigma = fm::sqrt(optInfo.squaredGraidentSum / optInfo.sampleCount - rayGradMean * rayGradMean);
                             double sampleRayDirGrad = rayGradMean + sample[1] * rayGradSigma;
@@ -376,10 +396,16 @@ Spectrum VolPathIntegratorGPIS::LiOptimized(const Ray &initialRay, std::shared_p
 
                             mediumState.realization.applyMemoryModel(ray.direction, MemoryModel::Renewal);
 #elif (GPIS_SAMPLE_NORMAL_METHOD == 1)
+                            Point3d intersection = mRec.scatterPoint;
+                            std::shared_ptr<GaussianProcess> gp = static_cast<GPISMedium *>(medium.get())->getGP();
                             Frame frame(ray.direction);
-                            mRec.aniso = normalize(frame.toWorld({gp->meanFunction->operator()(DerivativeType::First, pseudoPoint, frame.s),
-                                                                  gp->meanFunction->operator()(DerivativeType::First, pseudoPoint, frame.t),
-                                                                  gp->meanFunction->operator()(DerivativeType::First, pseudoPoint, frame.n)}));
+                            mRec.aniso = normalize(frame.toWorld({gp->meanFunction->operator()(DerivativeType::First, intersection, frame.s),
+                                                                  gp->meanFunction->operator()(DerivativeType::First, intersection, frame.t),
+                                                                  gp->meanFunction->operator()(DerivativeType::First, intersection, frame.n)}));
+#elif (GPIS_SAMPLE_NORMAL_METHOD == 2)
+                            Frame frame(optInfo.meanNormal);
+                            BeckmannDistribution beckmannDistribution;
+                            mRec.aniso = normalize(frame.toWorld(beckmannDistribution.Sample_wh(-ray.direction, sampler->sample2D(), {optInfo.beckmannRoughness, optInfo.beckmannRoughness})));
 #endif
                             sampleDistanceResult = true;
                         }
