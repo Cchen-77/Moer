@@ -24,13 +24,9 @@
 struct MediumState {
     // mainly for gpis medium which need the sampler
     Sampler &sampler;
-#if defined(ENABLE_GPISMEDIUM)
     GPRealization realization;
-#endif
     void reset() {
-#if defined(ENABLE_GPISMEDIUM)
         realization.reset();
-#endif
     }
 };
 

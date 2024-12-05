@@ -14,7 +14,6 @@ GPISMedium::GPISMedium(const Json &json) : Medium(std::make_shared<GPISPhase>(js
 }
 
 bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const Intersection &its, Point2d sample) const {
-#if defined(ENABLE_GPISMEDIUM)
 #if (GPIS_LIGHT_TRANSPORT_VERSION == 1)
     const double eps = 1e-6;
     GPRealization &gpRealization = mRec->mediumState->realization;
@@ -90,9 +89,6 @@ bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const 
 #else
     return false;
 #endif
-#else
-    return false;
-#endif
 }
 
 Spectrum GPISMedium::evalTransmittance(Point3d from, Point3d dest) const {
@@ -125,7 +121,6 @@ Spectrum GPISMedium::evalTransmittance(Point3d from, Point3d dest) const {
 }
 
 Spectrum GPISMedium::evalTransmittance2(Point3d from, Point3d dest, MediumState *mediumState) const {
-#if defined(ENABLE_GPISMEDIUM)
 #if (GPIS_LIGHT_TRANSPORT_VERSION == 1)
     Vec3d direction = (dest - from);
     if (direction.length() < 1e-4) {
@@ -161,10 +156,6 @@ Spectrum GPISMedium::evalTransmittance2(Point3d from, Point3d dest, MediumState 
     } else {
         return gaussianProcess->sampleFPTCond(ray, t, marchingNumSamplePoints, sampler, EXPAND_GPREALIZATION_WITH_VALUE(gpRealization));
     }
-#else
-    return 1.;
-#endif
-
 #else
     return 1.;
 #endif
