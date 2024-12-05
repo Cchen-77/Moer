@@ -20,6 +20,7 @@ endif (FM_SPEED_DEFAULT)
 option(EMBREE_USE_TBB "Enable TBB in embree." OFF)
 option(USE_SAMPLED_SPECTRUM "" OFF)
 option(ENABLE_GPISMEDIUM "enable gpis medium feature" ON)
+option(ENABLE_GPISMEDIUM_OPTIMIZATION "enable gpis-optimized volpathtracer" ON)
 
 set(MESH_LOADER "Tinyobjloader" CACHE STRING "Select mesh loader")
 set_property(CACHE MESH_LOADER PROPERTY STRINGS Assimp Tinyobjloader)

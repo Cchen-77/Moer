@@ -20,8 +20,19 @@ public:
     virtual Spectrum evalTransmittance2(Point3d from,
                                         Point3d dest,
                                         MediumState *mediumState) const override;
+    Spectrum evalTransmittanceOpt(Point3d from,
+                               Point3d dest,
+                               MediumState *meidumState) const;
 
     bool intersectGP(const Ray &ray, GPRealization &gpRealization, double &t, Sampler &sampler) const;
+
+    bool intersectMean(const Ray &ray, double &t) const;
+
+    virtual bool isGPIS() override { return true; }
+
+    std::shared_ptr<GaussianProcess> getGP() const {
+        return gaussianProcess;
+    }
 
 private:
     std::shared_ptr<GaussianProcess> gaussianProcess;
@@ -31,5 +42,4 @@ private:
     double marchingDesiredCov;
 
     MemoryModel memoryModel = MemoryModel::RenewalPlus;
-
 };

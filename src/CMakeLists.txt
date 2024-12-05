@@ -40,6 +40,11 @@ endif()
 
 if(ENABLE_GPISMEDIUM)
     target_compile_definitions(${TARGET_NAME} PRIVATE ENABLE_GPISMEDIUM)
+    if(ENABLE_GPISMEDIUM_OPTIMIZATION)
+        target_compile_definitions(${TARGET_NAME} PRIVATE ENABLE_GPISMEDIUM_OPTIMIZATION)
+    endif()
+elseif(ENABLE_GPISMEDIUM_OPTIMIZATION)
+    message(WARNING "enable gpismedium optimization without gpismedium enabled")
 endif()
 
 target_compile_definitions(${TARGET_NAME} PRIVATE CMAKE_DEF_SPECTRUM_SAMPLES=60)

@@ -8,7 +8,7 @@
     {
         "name" : "gpis",
         "type" : "gpis",
-        "marching_num_sample_points":32,
+        "marching_num_sample_points":16,
         "marching_step_size": 10000,
         "gaussian_process":{
           "type":"std",
@@ -85,6 +85,13 @@
       }
     },
     {
+        "type" : "quad",
+        "base" : [0, 0, 0],
+        "edge0" : [6, 0, 0],
+        "edge1" : [0, 0, 6],
+        "material" : "floor"
+    },
+    {
         "transform": {
             "rotation": [
                 -32.512420654296878,
@@ -98,7 +105,7 @@
     },
     {
         "type" : "infinite_sphere",
-        "emission" : "textures/FlowCheck.hdr"
+        "emission" : "textures/envmap.hdr"
     }
   ],
 

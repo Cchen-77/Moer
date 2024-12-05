@@ -11,6 +11,7 @@
 
 #include <variant>
 struct GaussianProcess {
+    
     GaussianProcess(std::shared_ptr<MeanFunction> _mean, std::shared_ptr<CovarianceFunction> _cov, const GPRealization &_globalCondition);
     virtual GPRealization sample(const Point3d *points, const DerivativeType *derivativeTypes, const Vec3d *derivativeDirs, size_t numPoints, const Vec3d &derivativeDir, Sampler &sampler) const;
     virtual GPRealization sampleCond(const Point3d *points, const DerivativeType *derivativeTypes, const Vec3d *derivativeDirs, size_t numPoints, const Vec3d &derivativeDir,
@@ -29,7 +30,6 @@ struct GaussianProcess {
 
     double meanZeroDownCrossingRate(const Point3d &pos, const Vec3d &ddir);
 
-protected:
     GPRealization globalCondition;
     std::variant<Eigen::LDLT<Eigen::MatrixXd>, Eigen::BDCSVD<Eigen::MatrixXd, Eigen::ComputeThinU | Eigen::ComputeThinV>> globalCondtionSolver;
     void initGlobalCondition(const GPRealization &_globalCondition);

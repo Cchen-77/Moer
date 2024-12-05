@@ -2,6 +2,7 @@
 #include "GPISPhase.h"
 #include "FunctionLayer/Sampler/Independent.h"
 #include "FunctionLayer/GaussianProcess/GaussianProcessFactory.h"
+#include "FunctionLayer/GaussianProcess/GaussianProcessUtils.h"
 
 GPISMedium::GPISMedium(const Json &json) : Medium(std::make_shared<GPISPhase>(json["phase"])) {
     marchingNumSamplePoints = getOptional(json, "marching_num_sample_points", 8);
@@ -133,11 +134,11 @@ Spectrum GPISMedium::evalTransmittance2(Point3d from, Point3d dest, MediumState 
     direction = normalize(direction);
     Ray ray{from, direction};
 
-    MediumSampleRecord sampleRecord{};
-    sampleRecord.mediumState = mediumState;
-
     Intersection its;
     its.t = (dest - from).length();
+
+    MediumSampleRecord sampleRecord{};
+    sampleRecord.mediumState = mediumState;
     bool shadowed = sampleDistance(&sampleRecord, ray, its, {});
 
     return 1. - shadowed;
@@ -167,6 +168,93 @@ Spectrum GPISMedium::evalTransmittance2(Point3d from, Point3d dest, MediumState 
 #else
     return 1.;
 #endif
+}
+
+Spectrum GPISMedium::evalTransmittanceOpt(Point3d from, Point3d dest, MediumState *mediumState) const {
+
+    Vec3d direction = (dest - from);
+    if (direction.length() < 1e-4) {
+        return 1.;
+    }
+    direction = normalize(direction);
+    Ray ray{from, direction};
+
+    ray.timeMax = std::min(ray.timeMax, ray.timeMin + 200);
+    ray.timeMax = std::min((dest - from).length(), ray.timeMax);
+
+    // bool shadowed = intersectMean(ray, t);
+
+    double maxDistance = ray.timeMax;
+    double determinedStepSize = maxDistance / (marchingNumSamplePoints - 1);
+
+    if (marchingStepSize < determinedStepSize) {
+        determinedStepSize = marchingStepSize;
+    }
+    int sampleCount = std::ceil(maxDistance / determinedStepSize);
+    std::vector<Point3d> points;
+    // nearby information is more important
+    points.push_back(ray.origin + ray.direction * 0.001 * determinedStepSize);
+    points.push_back(ray.origin + ray.direction * 0.01 * determinedStepSize);
+    points.push_back(ray.origin + ray.direction * 0.02 * determinedStepSize);
+    points.push_back(ray.origin + ray.direction * 0.04 * determinedStepSize);
+    points.push_back(ray.origin + ray.direction * 0.08 * determinedStepSize);
+    for (int i = 1; i <= sampleCount; ++i) {
+        double t = (i == sampleCount) ? ray.timeMax : (i * determinedStepSize);
+        Point3d p = ray.origin + t * ray.direction;
+        points.push_back(p);
+    }
+
+    double UnshadowedPosibility1 = 1.;
+    double UnshadowedPosibility2 = 1.;
+    // we need to get covariance and mean from gp directly,utilize global conditioning feature to apply realization condition and get conditioned cov and mean.
+    GaussianProcess transientGaussianProcess(gaussianProcess->meanFunction, gaussianProcess->covFunction, mediumState->realization);
+    double eps = 1e-12;
+    for (auto &point : points) {
+        DerivativeType derivativeTypeNone = DerivativeType::None;
+        auto [_mean, _cov] = transientGaussianProcess.meanAndCov(&point, &derivativeTypeNone, nullptr, 1, {});
+        double mean = _mean(0);
+        double variance = _cov(0, 0);
+        if (variance < 1e-32) {
+            // variance too small
+            if (mean < 0.) {
+                UnshadowedPosibility1 = 0.;
+            }
+            if (mean > 0.) {
+                UnshadowedPosibility2 = 0.;
+            }
+        } else {
+            double u = (0. - mean) / fm::sqrt(variance);
+            double cdf = std::clamp(0.5 * std::erfc(-u / 1.4142135623730951), 0., 1.);
+            UnshadowedPosibility1 *= 1. - cdf;
+            UnshadowedPosibility2 *= cdf;
+        }
+    }
+    return UnshadowedPosibility1 + UnshadowedPosibility2;
+
+    /*bool havSample = false;
+    double resSample = 0.;
+    for (auto &point : points) {
+        DerivativeType derivativeTypeNone = DerivativeType::None;
+        auto [_mean, _cov] = transientGaussianProcess.meanAndCov( point, &derivativeTypeNone, nullptr, 1, {});
+
+        double mean = _mean(0);
+        double variance = _cov(0, 0);
+        double sample;
+        if (havSample) {
+            sample = resSample;
+            havSample = false;
+        } else {
+            auto sample2 = rand_normal_2(mediumState->sampler);
+            sample = sample2[0];
+            resSample = sample2[1];
+            havSample = true;
+        }
+        double v = mean + sample * fm::sqrt(variance);
+        if (v < 0.) {
+            return 0.;
+        }
+    }
+    return 1.;*/
 }
 
 bool GPISMedium::intersectGP(const Ray &ray, GPRealization &gpRealization, double &t, Sampler &sampler) const {
@@ -216,6 +304,34 @@ bool GPISMedium::intersectGP(const Ray &ray, GPRealization &gpRealization, doubl
             return true;
         }
         t = ts[i];
+        lastV = curV;
+        lastT = curT;
+    }
+    return false;
+}
+
+bool GPISMedium::intersectMean(const Ray &ray, double &t) const {
+    double maxDistance = ray.timeMax - t;
+    double determinedStepSize = maxDistance / (marchingNumSamplePoints - 1);
+
+    if (marchingStepSize < determinedStepSize) {
+        determinedStepSize = marchingStepSize;
+    }
+    determinedStepSize = std::min(determinedStepSize, gaussianProcess->goodStepSize(ray.origin + ray.direction * t, ray.direction, marchingDesiredCov, determinedStepSize));
+
+    int sampleCount = std::ceil(maxDistance / determinedStepSize);
+
+    double lastV = gaussianProcess->meanFunction->operator()(DerivativeType::None, ray.origin);
+    double lastT = t;
+    for (int i = 1; i <= sampleCount; ++i) {
+        double curT = (i == sampleCount) ? ray.timeMax : (t + i * determinedStepSize);
+        double curV = gaussianProcess->meanFunction->operator()(DerivativeType::None, ray.origin + curT * ray.direction);
+        if (lastV * curV < 0.) {
+            double offset = lastV / (lastV - curV);
+            t = lerp(lastT, curT, offset);
+            return true;
+        }
+        t = curT;
         lastV = curV;
         lastT = curT;
     }
