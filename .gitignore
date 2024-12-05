@@ -6,5 +6,6 @@ NJUCG.mdj
 cmake-build*
 .idea
 ./doxygen-doc
-scenes/**/*.hdr
-scenes/**/results
+scenes/*.hdr
+scenes/result/*.hdr
+ 
