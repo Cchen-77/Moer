@@ -1,6 +1,6 @@
 {
   "renderer" : {
-    "spp" : 32,
+    "spp" : 1,
     "output_file" : "gpis"
   },
 
@@ -8,7 +8,7 @@
     {
       "name" : "gpis-hard",
       "type" : "gpis",
-      "marching_num_sample_points":32,
+      "marching_num_sample_points":8,
       "marching_step_size": 10000,
       "gaussian_process":{
         "type":"std",
@@ -17,7 +17,7 @@
           "func":"knob",
           "transform":{
             "position":[-0.8,0.37,0],
-            "scale":[0.5,0.5,0.5],
+            "scale":0.5,
             "rotation":[0,0,0]     
           }
         },
@@ -54,7 +54,7 @@
     {
         "name" : "gpis-soft",
         "type" : "gpis",
-        "marching_num_sample_points":32,
+        "marching_num_sample_points":8,
         "marching_step_size": 10000,
         "gaussian_process":{
           "type":"std",
@@ -63,7 +63,7 @@
             "func":"knob",
             "transform":{
               "position":[0.8,0.37,0],
-              "scale":[0.5,0.5,0.5],
+              "scale":0.5,
               "rotation":[0,0,0]     
             }
           },
@@ -149,7 +149,7 @@
   ],
 
   "camera" : {
-    "resolution" : [1024, 1024],
+    "resolution" : [512, 512],
     "type" : "pinhole",
     "fov" : 19.5,
 

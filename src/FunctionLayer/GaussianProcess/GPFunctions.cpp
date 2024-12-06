@@ -37,8 +37,9 @@ MeanFunction::MeanFunction(const Json &json) {
 
     Point3d transformPos = getOptional(transform, "position", Point3d(0.0));
     transformMatrix.setTranslate(transformPos.x, transformPos.y, transformPos.z);
-    Vec3d transformScale = getOptional(transform, "scale", Vec3d(1, 1, 1));
-    transformMatrix.setScale(transformScale.x, transformScale.y, transformScale.z);
+    // Uniform scaling across all axes is required
+    transformScale = getOptional(transform, "scale", 1.);
+    transformMatrix.setScale(transformScale);
     Vec3d transformRot = getOptional(transform, "rotation", Vec3d(0, 0, 0));
     transformMatrix.setRotateEuler(Angle(transformRot.x, Angle::EAngleType::ANGLE_DEG),
                                    Angle(transformRot.y, Angle::EAngleType::ANGLE_DEG),
@@ -70,6 +71,8 @@ ProceduralMean::ProceduralMean(const Json &json) : MeanFunction(json) {
 double ProceduralMean::mean(const Point3d &point) const {
     auto invTransformedPoint = invTransformMatrix * point;
     double sd = SdfFunctions::eval(func, invTransformedPoint);
+    // signed distance should be also scaled
+    sd *= transformScale;
     return scale * sd + offset;
 }
 
@@ -99,6 +102,7 @@ double TabulatedMean::mean(const Point3d &point) const {
     p = clamp(p, worldBBox);
     Point3d index = meanFloatGrid->worldToIndex(p);
     float res = nanovdb::SampleFromVoxels<nanovdb::DefaultReadAccessor<float>, 1, false>(*meanGridAccessor)(index);
+    res *= transformScale;
     return scale * res + offset;
 }
 

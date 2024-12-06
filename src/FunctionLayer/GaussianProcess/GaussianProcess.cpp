@@ -122,14 +122,28 @@ double GaussianProcess::meanZeroDownCrossingRate(const Point3d &pos, const Vec3d
 }
 
 double GaussianProcess::sampleFPT(const Ray &ray, double &t, double numSampleCount, Sampler &sampler) {
-    return 0.;
+    double minStepSize = 1e-6;
+    double distance = fm::abs(meanFunction->operator()(DerivativeType::None, ray.at(t)));
+    while (1) {
+        t += (distance > minStepSize ? distance : minStepSize);
+        double _mean = meanFunction->operator()(DerivativeType::None, ray.at(t));
+        if (_mean <= 0) {
+            t += _mean;
+            return 0.;
+        }
+        if (t > ray.timeMax) {
+            return 1.;
+        }
+        distance = _mean;
+    }
+    return 1.;
 }
 
 double GaussianProcess::sampleFPTCond(const Ray &ray, double &t, double numSampleCount, Sampler &sampler,
                                       const Point3d *pointsCond, const DerivativeType *derivativeTypesCond, const Vec3d *derivativeDirsCond, const double *valuesCond, size_t numPointsCond, const Vec3d &derivativeDirCond) {
-    if (numPointsCond == 0) {
-        return sampleFPT(ray, t, numSampleCount, sampler);
-    }
+
+    return sampleFPT(ray, t, numSampleCount, sampler);
+
     // we need the conditioned covariance and mean.
     // utilize global conditon feature
     auto transientGlobalCondition = globalCondition;

@@ -35,8 +35,8 @@ bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const 
                 mRec->marchLength = t;
                 mRec->scatterPoint = point;
             }
-            gpRealization.applyMemoryModel(r.direction, memoryModel);
         }
+        gpRealization.applyMemoryModel(r.direction, memoryModel);
     } while (!intersected && r.timeMax - t > eps);
     mRec->sigmaS = 1.;
     mRec->sigmaA = 0.;

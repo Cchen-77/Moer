@@ -3,7 +3,7 @@
 #include "Medium.h"
 #include "CoreLayer/Adapter/JsonUtil.h"
 #include "FunctionLayer/GaussianProcess/GaussianProcess.h"
-#define GPIS_LIGHT_TRANSPORT_VERSION 1
+#define GPIS_LIGHT_TRANSPORT_VERSION 2
 class GPISMedium : public Medium {
 public:
     GPISMedium() = default;
@@ -41,5 +41,5 @@ private:
     double marchingStepSize;
     double marchingDesiredCov;
 
-    MemoryModel memoryModel = MemoryModel::RenewalPlus;
+    MemoryModel memoryModel = MemoryModel::Renewal;
 };

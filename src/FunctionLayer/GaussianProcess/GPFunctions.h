@@ -31,6 +31,8 @@ protected:
     virtual double mean(const Point3d &point) const = 0;
     virtual Vec3d dmean_dp(const Point3d &point) const;
 
+    // Uniform scaling across all axes is required
+    double transformScale;
     mutable TransformMatrix3D transformMatrix;
     mutable TransformMatrix3D invTransformMatrix;
 
