@@ -132,10 +132,10 @@
     },
     {
         "type" : "cube",
-        "material" : "interface-soft",
+        "material" : "interface-hard",
         "transform" : {
           "scale" : [2, 2, 2],
-          "position" : [0.8, 1.05, 0]
+          "position" : [-0.8, 1.05, 0]
         }
     }
   ],

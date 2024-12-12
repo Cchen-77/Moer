@@ -106,15 +106,41 @@ bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const 
         mRec->marchLength = t;
         mRec->scatterPoint = intersection;
 
-        double lambda2 = 0.;
-        if (conditionedGaussianProcess) {
-            lambda2 = conditionedGaussianProcess.covSym(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0);
-        } else {
-            lambda2 = gaussianProcess->covSym(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0);
-        }
-        double Z = lambda2 * fm::sqrt(-2 * std::log(sampler.sample1D()));
+        double meanZ = 0.;
+        double varianceZ = 0.;
 
-        gpRealization.manualIntersectionAndNormal(intersection, r.direction, Z + gaussianProcess->mean(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0));
+        if (conditionedGaussianProcess) {
+            double kCC = conditionedGaussianProcess.covSym(&intersection, DerivativeTypeNone(), nullptr, 1, {})(0, 0);
+            double kxC = conditionedGaussianProcess.cov(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction,
+                                                        &intersection, DerivativeTypeNone(), nullptr, 1, {})(0, 0);
+            double kCx = conditionedGaussianProcess.cov(&intersection, DerivativeTypeNone(), nullptr, 1, {}, &intersection,
+                                                        DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0);
+            double coeff = kxC * kCx / kCC;
+            meanZ = conditionedGaussianProcess.mean(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0) -
+                    kxC * kCx / kCC * conditionedGaussianProcess.mean(&intersection, DerivativeTypeNone(), nullptr, 1, ray.direction)(0);
+            //varianceZ = conditionedGaussianProcess.covSym(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0) - coeff;
+        } else {
+            double kCC = gaussianProcess->covSym(&intersection, DerivativeTypeNone(), nullptr, 1, {})(0, 0);
+            double kxC = gaussianProcess->cov(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction,
+                                              &intersection, DerivativeTypeNone(), nullptr, 1, {})(0, 0);
+            double kCx = gaussianProcess->cov(&intersection, DerivativeTypeNone(), nullptr, 1, {}, &intersection,
+                                              DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0);
+            double coeff = kxC * kCx / kCC;
+            meanZ = gaussianProcess->mean(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0) -
+                    kxC * kCx / kCC * gaussianProcess->mean(&intersection, DerivativeTypeNone(), nullptr, 1, ray.direction)(0);
+            //varianceZ = gaussianProcess->covSym(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0) - coeff;
+        }
+       
+        double Z = meanZ;
+        /*double sigmaZ = fm::sqrt(varianceZ);
+        if (meanZ < 3 * sigmaZ) {
+            if (meanZ + 3 * sigmaZ < 0.) {
+                Z = meanZ + sigmaZ * rand_normal_2(sampler)[0];
+            } else {
+                Z = gaussianQuantile(meanZ, sigmaZ, sampler.sample1D() * gaussianCDF(meanZ, sigmaZ, 0.));
+            }
+        }*/
+        gpRealization.manualIntersectionAndNormal(intersection, r.direction, Z);
         mRec->aniso = normalize(gpRealization.sampleGradient(intersection, r.direction, sampler));
         gpRealization.applyMemoryModel(r.direction, memoryModel);
         return true;

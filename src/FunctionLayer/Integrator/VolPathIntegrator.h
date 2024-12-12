@@ -95,6 +95,6 @@ public:
                             const MediumState *mediumState) const;
 
 protected:
-    const int nPathLengthLimit = 1;
+    const int nPathLengthLimit = 64;
     const double pRussianRoulette = 0.95;
 };
