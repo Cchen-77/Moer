@@ -39,18 +39,21 @@ void GPRealization::makeIntersection(size_t p, double offset) {
 }
 
 void GPRealization::manualIntersectionAndNormal(Point3d pos, Vec3d rayDir, double grad) {
-    // intersection
-    points.push_back(pos);
-    derivativeTypes.push_back(DerivativeType::None);
-    derivativeDirections.push_back({});
-    values.push_back(0.);
-    // grad
-    points.push_back(pos);
-    derivativeTypes.push_back(DerivativeType::First);
-    derivativeDirections.push_back(rayDir);
-    values.push_back(grad);
+    if (!justIntersected) {
+        // intersection
+        points.push_back(pos);
+        derivativeTypes.push_back(DerivativeType::None);
+        derivativeDirections.push_back({});
+        values.push_back(0.);
+        justIntersected = true;
+        // grad
+        points.push_back(pos);
+        derivativeTypes.push_back(DerivativeType::First);
+        derivativeDirections.push_back(rayDir);
+        values.push_back(grad);
 
-    justIntersected = true;
+        justIntersected = true;
+    }
 }
 
 Vec3d GPRealization::sampleGradient(Point3d pos, Vec3d rayDir, Sampler &sampler) {
@@ -123,10 +126,12 @@ void GPRealization::applyMemoryModel(Vec3d rayDir, MemoryModel memoryModel) {
             derivativeTypesNew.push_back(DerivativeType::None);
             valuesNew.push_back(values[p]);
 
-            pointsNew.push_back(points[p]);
-            derivativeDirectionsNew.push_back(rayDir);
-            derivativeTypesNew.push_back(DerivativeType::First);
-            valuesNew.push_back(dot(lastSampledGrad, rayDir));
+            if (!lastSampledGrad.isZero()) {
+                pointsNew.push_back(points[p]);
+                derivativeDirectionsNew.push_back(rayDir);
+                derivativeTypesNew.push_back(DerivativeType::First);
+                valuesNew.push_back(dot(lastSampledGrad, rayDir));
+            }
 
             points = pointsNew;
             derivativeDirections = derivativeDirectionsNew;

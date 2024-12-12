@@ -13,6 +13,15 @@ enum class DerivativeType {
     First,
 };
 
+inline DerivativeType *DerivativeTypeNone() {
+    static DerivativeType type = DerivativeType::None;
+    return &type;
+}
+inline DerivativeType *DerivativeTypeFirst() {
+    static DerivativeType type = DerivativeType::First;
+    return &type;
+}
+
 template<typename To, typename From>
 inline To vec_conv(const From &vd) {
     return To{vd.x, vd.y, vd.x};

@@ -41,5 +41,5 @@ private:
     double marchingStepSize;
     double marchingDesiredCov;
 
-    MemoryModel memoryModel = MemoryModel::Renewal;
+    MemoryModel memoryModel = MemoryModel::RenewalPlus;
 };

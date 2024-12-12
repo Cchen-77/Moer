@@ -121,28 +121,96 @@ double GaussianProcess::meanZeroDownCrossingRate(const Point3d &pos, const Vec3d
     return pdf * cdf;
 }
 
-double GaussianProcess::sampleFPT(const Ray &ray, double &t, double numSampleCount, Sampler &sampler) {
-    double minStepSize = 1e-6;
-    double distance = fm::abs(meanFunction->operator()(DerivativeType::None, ray.at(t)));
-    while (1) {
-        t += (distance > minStepSize ? distance : minStepSize);
-        double _mean = meanFunction->operator()(DerivativeType::None, ray.at(t));
-        if (_mean <= 0) {
-            t += _mean;
-            return 0.;
+std::tuple<bool, bool> GaussianProcess::sampleFPT(const Ray &ray, double &t, Sampler &sampler) {
+    double eps = 1e-3;
+
+    double sigma = fm::sqrt(covFunction->operator()(DerivativeType::None, {0, 0, 0}, DerivativeType::None, {0, 0, 0}));
+    double sigma3 = sigma * 3;
+    double minMarchingStepSize = 1e-6;
+
+    double nearlyOneThreshold = 0.99;
+    double nearlyZeroThreshold = 0.01;
+
+    double fineCheckingDistance = 24 * sigma;
+    double fineCheckingSampleNum = 32;
+
+    double initialTime = t;
+
+    while (ray.timeMax - t > eps) {
+        double distance = fm::abs(meanFunction->operator()(DerivativeType::None, ray.at(t), {}));
+        if (distance <= sigma3) {
+            bool useNoReturnApporximation = true;
+            bool nearlyZeroHitPossibility = true;
+
+            double fineCheckingStepSize = std::min(fineCheckingDistance, ray.timeMax - t) / (fineCheckingSampleNum - 1);
+            Vec3d fineCheckingStep = ray.direction * fineCheckingStepSize;
+
+            double curT = t;
+            Point3d curPos = ray.at(t);
+
+            double lastP = 0.;
+
+            double u = sampler.sample1D();
+            double noReturnFPTSample = t;
+            for (int i = 0; i <= fineCheckingSampleNum; ++i) {
+
+                curT = t + fineCheckingStepSize * i;
+                /*if (curT < initialTime + eps || curT > ray.timeMax - eps) {
+                    continue;
+                }*/
+                curPos = ray.at(curT);
+
+                double _mean = mean(&curPos, DerivativeTypeNone(), nullptr, 1, {})(0);
+                double _cov = covSym(&curPos, DerivativeTypeNone(), nullptr, 1, {})(0, 0);
+                double P = gaussianCDF(_mean, fm::sqrt(_cov), 0.);
+
+                if (P < lastP) {
+                    useNoReturnApporximation = false;
+                }
+
+                if (u > lastP && u < P) {
+                    noReturnFPTSample = lerp(curT - fineCheckingStepSize, curT, (u - lastP) / (P - lastP));
+                }
+
+                lastP = P;
+
+                if (lastP > nearlyZeroThreshold) {
+                    nearlyZeroHitPossibility = false;
+                }
+                if (lastP > nearlyOneThreshold) {
+                    break;
+                }
+
+                if (!nearlyZeroHitPossibility && !useNoReturnApporximation) {
+                    break;
+                }
+            }
+
+            if (nearlyZeroHitPossibility) {
+                t = curT;
+                continue;
+            }
+
+            if (useNoReturnApporximation) {
+                if (lastP < nearlyOneThreshold) {
+                    return {false, false};
+                } else {
+                    t = noReturnFPTSample;
+                    return {true, true};
+                }
+            }
+            return {false, false};
         }
-        if (t > ray.timeMax) {
-            return 1.;
-        }
-        distance = _mean;
+        t += std::max(minMarchingStepSize, distance - sigma3);
     }
-    return 1.;
+    return {true, false};
 }
 
-double GaussianProcess::sampleFPTCond(const Ray &ray, double &t, double numSampleCount, Sampler &sampler,
-                                      const Point3d *pointsCond, const DerivativeType *derivativeTypesCond, const Vec3d *derivativeDirsCond, const double *valuesCond, size_t numPointsCond, const Vec3d &derivativeDirCond) {
-
-    return sampleFPT(ray, t, numSampleCount, sampler);
+std::tuple<bool, bool> GaussianProcess::sampleFPTCond(const Ray &ray, double &t, Sampler &sampler,
+                                                      const Point3d *pointsCond, const DerivativeType *derivativeTypesCond, const Vec3d *derivativeDirsCond, const double *valuesCond, size_t numPointsCond, const Vec3d &derivativeDirCond) {
+    if (numPointsCond == 0) {
+        return sampleFPT(ray, t, sampler);
+    }
 
     // we need the conditioned covariance and mean.
     // utilize global conditon feature
@@ -155,7 +223,7 @@ double GaussianProcess::sampleFPTCond(const Ray &ray, double &t, double numSampl
         transientGlobalCondition.values.push_back(valuesCond[i]);
     }
     GaussianProcess transientGP(meanFunction, covFunction, transientGlobalCondition);
-    return transientGP.sampleFPT(ray, t, numSampleCount, sampler);
+    return transientGP.sampleFPT(ray, t, sampler);
 }
 
 Eigen::VectorXd GaussianProcess::meanPrior(const Point3d *points, const DerivativeType *derivativeTypes, const Vec3d *derivativeDirs, size_t numPoints, const Vec3d &derivativeDir) const {

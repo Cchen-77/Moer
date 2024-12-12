@@ -11,19 +11,24 @@
 
 #include <variant>
 struct GaussianProcess {
-    
+    GaussianProcess() = default;
     GaussianProcess(std::shared_ptr<MeanFunction> _mean, std::shared_ptr<CovarianceFunction> _cov, const GPRealization &_globalCondition);
     virtual GPRealization sample(const Point3d *points, const DerivativeType *derivativeTypes, const Vec3d *derivativeDirs, size_t numPoints, const Vec3d &derivativeDir, Sampler &sampler) const;
     virtual GPRealization sampleCond(const Point3d *points, const DerivativeType *derivativeTypes, const Vec3d *derivativeDirs, size_t numPoints, const Vec3d &derivativeDir,
                                      const Point3d *pointsCond, const DerivativeType *derivativeTypesCond, const Vec3d *derivativeDirsCond, const double *valuesCond, size_t numPointsCond, const Vec3d &derivativeDirCond,
                                      Sampler &sampler) const;
 
-    virtual double sampleFPT(const Ray &ray, double &t, double numSampleCount, Sampler &sampler);
-    virtual double sampleFPTCond(const Ray &ray, double &t, double numSampleCount, Sampler &sampler,
-                               const Point3d *pointsCond, const DerivativeType *derivativeTypesCond, const Vec3d *derivativeDirsCond, const double *valuesCond, size_t numPointsCond, const Vec3d &derivativeDirCond);
+    /**
+     * @brief sample a first-time-passage time along the ray
+     * @return std::tuple<bool, bool>
+     * whether our FPTD sample is a good and whether we FPT sample < ray.timeMax
+     */
+    virtual std::tuple<bool, bool> sampleFPT(const Ray &ray, double &t, Sampler &sampler);
+    virtual std::tuple<bool, bool> sampleFPTCond(const Ray &ray, double &t, Sampler &sampler,
+                                                 const Point3d *pointsCond, const DerivativeType *derivativeTypesCond, const Vec3d *derivativeDirsCond, const double *valuesCond, size_t numPointsCond, const Vec3d &derivativeDirCond);
 
-    std::shared_ptr<MeanFunction> meanFunction;
-    std::shared_ptr<CovarianceFunction> covFunction;
+    std::shared_ptr<MeanFunction> meanFunction = nullptr;
+    std::shared_ptr<CovarianceFunction> covFunction = nullptr;
 
     // return a heuristics stepsize base on meanFunction and covFunction
     virtual double goodStepSize(Point3d p, Vec3d rd, double desiredCov, double stepSize) const;
@@ -44,7 +49,10 @@ struct GaussianProcess {
     Eigen::VectorXd mean(const Point3d *points, const DerivativeType *derivativeTypes, const Vec3d *derivativeDirs, size_t numPoints, const Vec3d &derivativeDir) const;
     Eigen::MatrixXd cov(const Point3d *pointsX, const DerivativeType *derivativeTypesX, const Vec3d *derivativeDirsX, size_t numPointsX, const Vec3d &derivativeDirX,
                         const Point3d *pointsY, const DerivativeType *derivativeTypesY, const Vec3d *derivativeDirsY, size_t numPointsY, const Vec3d &derivativeDirY) const;
-    Eigen::MatrixXd covSym(const Point3d *points, const DerivativeType *derivativeTypes, const Vec3d *derivativeDirs, size_t numPointsconst, const Vec3d &derivativeDir) const;
+    Eigen::MatrixXd covSym(const Point3d *points, const DerivativeType *derivativeTypes, const Vec3d *derivativeDirs, size_t numPoints, const Vec3d &derivativeDir) const;
     std::tuple<Eigen::VectorXd, Eigen::MatrixXd> meanAndCov(const Point3d *points, const DerivativeType *derivativeTypes, const Vec3d *derivativeDirs, size_t numPoints, const Vec3d &derivativeDir) const;
 
+    operator bool() const {
+        return meanFunction != nullptr;
+    }
 };

@@ -49,6 +49,7 @@ bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const 
     // Gamma(t,n|zeta)
     // = kappa(n|t is first-passage-time,zeta) * first-passage-time-density(t|zeta)
     // = hat-kappa(n|t is a 0-downcrossing,zeta) * first-passage-density(t|zeta)
+    const double eps = 1e-6;
     Sampler &sampler = mRec->mediumState->sampler;
     GPRealization &gpRealization = mRec->mediumState->realization;
 
@@ -65,27 +66,59 @@ bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const 
     mRec->tr = 1.;
     mRec->pdf = 1.;
 
-    double Tr = 0.;
+    bool goodFPTSample = false, intersected = false;
+    GaussianProcess conditionedGaussianProcess;
     if (gpRealization.isEmpty()) {
         gpRealization.gp = gaussianProcess.get();
-        Tr = gaussianProcess->sampleFPT(r, t, marchingNumSamplePoints, sampler);
+        std::tie(goodFPTSample, intersected) = gaussianProcess->sampleFPT(r, t, sampler);
     } else {
-        Tr = gaussianProcess->sampleFPTCond(r, t, marchingNumSamplePoints, sampler, EXPAND_GPREALIZATION_WITH_VALUE(gpRealization));
+        auto transientGlobalCondition = gaussianProcess->globalCondition;
+        for (int i = 0; i < gpRealization.size(); ++i) {
+            transientGlobalCondition.points.push_back(gpRealization.points[i]);
+            transientGlobalCondition.derivativeTypes.push_back(gpRealization.derivativeTypes[i]);
+            transientGlobalCondition.derivativeDirections.push_back(gpRealization.derivativeDirections[i]);
+            transientGlobalCondition.values.push_back(gpRealization.values[i]);
+        }
+        conditionedGaussianProcess = GaussianProcess(gaussianProcess->meanFunction, gaussianProcess->covFunction, transientGlobalCondition);
+        std::tie(goodFPTSample, intersected) = conditionedGaussianProcess.sampleFPT(r, t, sampler);
     }
 
-    if (sampler.sample1D() < Tr) {
-        return false;
+    if (!goodFPTSample) {
+        intersected = false;
+        t = ray.timeMin;
+        do {
+            intersected = intersectGP(r, gpRealization, t, sampler);
+            if (t < r.timeMax) {
+                Point3d point = r.origin + t * r.direction;
+                Vec3d grad = gpRealization.sampleGradient(point, r.direction, sampler);
+                if (intersected) {
+                    mRec->aniso = normalize(grad);
+                    mRec->marchLength = t;
+                    mRec->scatterPoint = point;
+                }
+            }
+            gpRealization.applyMemoryModel(r.direction, memoryModel);
+        } while (!intersected && r.timeMax - t > eps);
+        return intersected;
+    } else {
+        if (!intersected) return false;
+        Point3d intersection = r.origin + r.direction * t;
+        mRec->marchLength = t;
+        mRec->scatterPoint = intersection;
+
+        double lambda2 = 0.;
+        if (conditionedGaussianProcess) {
+            lambda2 = conditionedGaussianProcess.covSym(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0);
+        } else {
+            lambda2 = gaussianProcess->covSym(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0);
+        }
+        double Z = lambda2 * fm::sqrt(-2 * std::log(sampler.sample1D()));
+
+        gpRealization.manualIntersectionAndNormal(intersection, r.direction, Z + gaussianProcess->mean(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0));
+        mRec->aniso = normalize(gpRealization.sampleGradient(intersection, r.direction, sampler));
+        gpRealization.applyMemoryModel(r.direction, memoryModel);
+        return true;
     }
-
-    Point3d intersection = r.origin + r.direction * t;
-
-    mRec->marchLength = t;
-    mRec->scatterPoint = intersection;
-    gpRealization.manualIntersectionAndNormal(intersection, r.direction, -1);
-    mRec->aniso = normalize(gpRealization.sampleGradient(intersection, r.direction, sampler));
-    gpRealization.applyMemoryModel(ray.direction, MemoryModel::RenewalPlus);
-
-    return true;
 #else
     return false;
 #endif
@@ -137,27 +170,23 @@ Spectrum GPISMedium::evalTransmittance2(Point3d from, Point3d dest, MediumState 
     bool shadowed = sampleDistance(&sampleRecord, ray, its, {});
 
     return 1. - shadowed;
-#elif (GPIS_LIGHT_TRANSPORT_VERSION == 2)
-    Sampler &sampler = mediumState->sampler;
-    GPRealization &gpRealization = mediumState->realization;
-
-    Vec3d direction = (dest - from);
+#else
+    double eps = 1e-4;
+    Vec3d direction = (from - dest);
     if (direction.length() < 1e-4) {
         return 1.;
     }
     direction = normalize(direction);
-    Ray ray{from, direction};
-    ray.timeMax = (dest - from).length();
+    Ray ray{dest, direction};
+    ray.timeMin = eps;
+    Intersection its;
+    its.t = (from - dest).length() - eps;
 
-    double t = 0.;
-    if (gpRealization.isEmpty()) {
-        gpRealization.gp = gaussianProcess.get();
-        return gaussianProcess->sampleFPT(ray, t, marchingNumSamplePoints, sampler);
-    } else {
-        return gaussianProcess->sampleFPTCond(ray, t, marchingNumSamplePoints, sampler, EXPAND_GPREALIZATION_WITH_VALUE(gpRealization));
-    }
-#else
-    return 1.;
+    MediumSampleRecord sampleRecord{};
+    sampleRecord.mediumState = mediumState;
+    bool shadowed = sampleDistance(&sampleRecord, ray, its, {});
+
+    return 1. - shadowed;
 #endif
 }
 
