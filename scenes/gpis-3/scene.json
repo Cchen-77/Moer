@@ -1,0 +1,100 @@
+{
+  "renderer" : {
+    "spp" : 32,
+    "output_file" : "gpis"
+  },
+
+  "mediums" : [
+    {
+        "name" : "gpis",
+        "type" : "gpis",
+        "marching_num_sample_points":32,
+        "marching_step_size": 10000,
+        "gaussian_process":{
+          "type":"std",
+          "mean":{
+            "type":"tabulated",
+            "file":"model/bunny.nvdb",
+            "grid_name":"mean",
+            "transform":{
+              "position":[0,0.6,0],
+              "scale":0.5,
+              "rotation":[0,0,0]     
+            },
+            "grid_should_be_normalized":true
+          },
+          "covariance":{
+            "type":"squared_exponential",
+            "lengthScale":0.1,
+            "sigma":0.001
+          }
+        },
+        
+        "phase":{
+          "type" : "lambert",
+          "albedo": [0.5647, 0.9333, 0.5647]
+        }  
+      }
+  ],
+
+  "materials" : [
+    {
+      "name" : "interface",
+      "type" : "null",
+      "in_medium":"gpis"
+    },
+    {
+        "name": "floor",
+        "albedo": {
+          "type": "checker",
+          "on_color": [
+            0.725,
+            0.71,
+            0.68
+          ],
+          "off_color": [
+            0.325,
+            0.31,
+            0.25
+          ],
+          "res_u": 20,
+          "res_v": 20
+        },
+        "type": "lambert"
+    }
+  ],
+
+  "entities" : [
+    {
+        "type" : "quad",
+        "base" : [0, 0, 0],
+        "edge0" : [6, 0, 0],
+        "edge1" : [0, 0, 6],
+        "material" : "floor"
+    },
+    {
+      "type" : "cube",
+      "material" : "interface",
+      "transform" : {
+        "scale" : [1,1,1],
+        "position" : [0,0.6,0]
+      }
+    },
+    {
+        "type" : "infinite_sphere",
+        "emission" : "textures/envmap.hdr"
+    }
+  ],
+
+  "camera" : {
+    "resolution" : [1024, 1024],
+    "type" : "pinhole",
+    "fov" : 19.5,
+
+    "transform" : {
+      "position" : [0, 1.5, 4],
+      "up" : [0, 1, 0],
+      "look_at" : [0, 0.5, 0]
+    }
+  }
+}

@@ -32,7 +32,7 @@ Spectrum VolPathIntegrator::Li(const Ray &initialRay, std::shared_ptr<Scene> sce
 
     Ray ray = initialRay;
 
-    const double eps = 1e-5;
+    const double eps = 1e-4;
     int nBounces = 0;
     bool specularBounce = false;
     PathIntegratorLocalRecord prevLightSampleRecord;

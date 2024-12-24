@@ -8,41 +8,31 @@
     {
         "name" : "gpis",
         "type" : "gpis",
-        "marching_num_sample_points":16,
+        "marching_num_sample_points":32,
         "marching_step_size": 10000,
         "gaussian_process":{
           "type":"std",
           "mean":{
             "type":"tabulated",
-            "file":"model/dragon_low.nvdb",
-            "grid_name":"mesh2ls_dragon",
+            "file":"model/scene2.nvdb",
+            "grid_name":"mean",
             "transform":{
-              "position":[-0.5,0,-0.5],
-              "scale":[1,1,1],
+              "position":[0,0.55,0],
+              "scale":0.9,
               "rotation":[0,0,0]     
             },
             "grid_should_be_normalized":true
           },
           "covariance":{
-            "type":"nonstationary",
-            "local_variance":"model/local_variance.nvdb",
-            "correlation":"model/correlation.nvdb",
-            "transform":{
-              "position":[-0.5,0,-0.5],
-              "scale":[0.8,0.6,1],
-              "rotation":[0,0,0]     
-            },
-            "grid_should_be_normalized":true,
-            "stationary_covariance":{
-              "type":"squared_exponential",
-              "lengthScale":0.1,
-              "sigma":0.1
-            }
+            "type":"squared_exponential",
+            "lengthScale":0.1,
+            "sigma":0.01
           }
         },
         
         "phase":{
-          "type":"mirror"
+          "type" : "lambert",
+          "albedo": 0.9
         }  
       }
   ],
@@ -71,37 +61,92 @@
           "res_v": 20
         },
         "type": "lambert"
-    }
+    },
+    {
+        "name" : "leftWall",
+        "type" : "lambert",
+        "albedo" : [0.63, 0.0065, 0.05]
+      },
+      {
+        "name" : "rightWall",
+        "type" : "lambert",
+        "albedo" : [0.14, 0.45, 0.091]
+      },
+      {
+        "name" : "floor",
+        "type" : "lambert",
+        "albedo" : [0.725, 0.71, 0.68]
+      },
+      {
+        "name" : "ceiling",
+        "type" : "lambert",
+        "albedo" : [0.725, 0.71, 0.68]
+      },
+      {
+        "name" : "backWall",
+        "type" : "lambert",
+        "albedo" : [0.725, 0.71, 0.68]
+      },
+      {
+        "name" : "light",
+        "type" : "lambert",
+        "albedo" : [0, 0, 0]
+      }
   ],
 
   "entities" : [
-    
+    {
+        "type" : "quad",
+        "base" : [0, 0, 0],
+        "edge0" : [2, 0, 0],
+        "edge1" : [0, 0, 2],
+        "material" : "floor"
+      },
+      {
+        "type" : "quad",
+        "base" : [0, 2, 0],
+        "edge0" : [0, 0, -2],
+        "edge1" : [-2, 0, 0],
+        "material" : "ceiling"
+      },
+      {
+        "type" : "quad",
+        "base" : [0, 1, -1],
+        "edge0" : [-2, 0, 0],
+        "edge1" : [0, 2, 0],
+        "material" : "backWall"
+      },
+      {
+        "type" : "quad",
+        "base" : [-1, 1, 0],
+        "edge0" : [0, 0, 2],
+        "edge1" : [0, 2, 0],
+        "material" : "leftWall"
+      },
+      {
+        "type" : "quad",
+        "base" : [1, 1, 0],
+        "edge0" : [0, 0, -2],
+        "edge1" : [0, 2, 0],
+        "material" : "rightWall"
+      },
+      {
+        "type" : "quad",
+        "transform": {
+          "position": [-0.005, 1.98, -0.03],
+          "scale": [0.47, 0.1786, 0.38],
+          "rotation": [0, 180, 180]
+      },
+        "emission" : [30, 28, 20],
+        "material" : "light"
+      },
     {
       "type" : "cube",
       "material" : "interface",
       "transform" : {
-        "scale" : [1,0.6,0.6],
-        "position" : [0,0.25,0]
+        "scale" : [1.8,1.8,1.8],
+        "position" : [0,0.55,0]
       }
-    },
-    {
-        "type" : "quad",
-        "base" : [0, 0, 0],
-        "edge0" : [6, 0, 0],
-        "edge1" : [0, 0, 6],
-        "material" : "floor"
-    },
-    {
-        "transform": {
-            "rotation": [
-                -32.512420654296878,
-                160.0,
-                34.0
-            ]
-        },
-        "power": [1, 1, 1],
-        "type": "infinite_sphere_cap",
-        "cap_angle": 50
     },
     {
         "type" : "infinite_sphere",
@@ -110,14 +155,14 @@
   ],
 
   "camera" : {
-    "resolution" : [512, 512],
+    "resolution" : [1024, 1024],
     "type" : "pinhole",
     "fov" : 19.5,
 
     "transform" : {
-      "position" : [0, 1.5, 4],
+      "position" : [0, 1, 7],
       "up" : [0, 1, 0],
-      "look_at" : [0, 0.5, 0]
+      "look_at" : [0, 1, 0]
     }
   }
 }

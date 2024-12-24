@@ -15,6 +15,15 @@ GPISMedium::GPISMedium(const Json &json) : Medium(std::make_shared<GPISPhase>(js
 
 bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const Intersection &its, Point2d sample) const {
 #if (GPIS_LIGHT_TRANSPORT_VERSION == 1)
+    return sampleDistance1(mRec, ray, its, sample);
+#elif (GPIS_LIGHT_TRANSPORT_VERSION == 2)
+    return sampleDistance2(mRec, ray, its, sample);
+#else
+    return false;
+#endif
+}
+
+bool GPISMedium::sampleDistance1(MediumSampleRecord *mRec, const Ray &ray, const Intersection &its, Point2d sample) const {
     const double eps = 1e-6;
     GPRealization &gpRealization = mRec->mediumState->realization;
     Sampler &sampler = mRec->mediumState->sampler;
@@ -44,7 +53,9 @@ bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const 
     mRec->tr = 1.;
     mRec->needAniso = true;
     return intersected;
-#elif (GPIS_LIGHT_TRANSPORT_VERSION == 2)
+}
+
+bool GPISMedium::sampleDistance2(MediumSampleRecord *mRec, const Ray &ray, const Intersection &its, Point2d sample) const {
     // Performance optimized light transport which only work when Renewal or Renewal+ memory model applying
     // Gamma(t,n|zeta)
     // = kappa(n|t is first-passage-time,zeta) * first-passage-time-density(t|zeta)
@@ -85,7 +96,7 @@ bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const 
 
     if (!goodFPTSample) {
         intersected = false;
-        t = ray.timeMin;
+        t = r.timeMin;
         do {
             intersected = intersectGP(r, gpRealization, t, sampler);
             if (t < r.timeMax) {
@@ -118,7 +129,7 @@ bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const 
             double coeff = kxC * kCx / kCC;
             meanZ = conditionedGaussianProcess.mean(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0) -
                     kxC * kCx / kCC * conditionedGaussianProcess.mean(&intersection, DerivativeTypeNone(), nullptr, 1, ray.direction)(0);
-            //varianceZ = conditionedGaussianProcess.covSym(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0) - coeff;
+            // varianceZ = conditionedGaussianProcess.covSym(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0) - coeff;
         } else {
             double kCC = gaussianProcess->covSym(&intersection, DerivativeTypeNone(), nullptr, 1, {})(0, 0);
             double kxC = gaussianProcess->cov(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction,
@@ -128,9 +139,9 @@ bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const 
             double coeff = kxC * kCx / kCC;
             meanZ = gaussianProcess->mean(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0) -
                     kxC * kCx / kCC * gaussianProcess->mean(&intersection, DerivativeTypeNone(), nullptr, 1, ray.direction)(0);
-            //varianceZ = gaussianProcess->covSym(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0) - coeff;
+            // varianceZ = gaussianProcess->covSym(&intersection, DerivativeTypeFirst(), nullptr, 1, ray.direction)(0, 0) - coeff;
         }
-       
+
         double Z = meanZ;
         /*double sigmaZ = fm::sqrt(varianceZ);
         if (meanZ < 3 * sigmaZ) {
@@ -145,9 +156,7 @@ bool GPISMedium::sampleDistance(MediumSampleRecord *mRec, const Ray &ray, const 
         gpRealization.applyMemoryModel(r.direction, memoryModel);
         return true;
     }
-#else
     return false;
-#endif
 }
 
 Spectrum GPISMedium::evalTransmittance(Point3d from, Point3d dest) const {
@@ -197,9 +206,9 @@ Spectrum GPISMedium::evalTransmittance2(Point3d from, Point3d dest, MediumState 
 
     return 1. - shadowed;
 #else
-    double eps = 1e-4;
+    double eps = 1e-3;
     Vec3d direction = (from - dest);
-    if (direction.length() < 1e-4) {
+    if (direction.length() < eps) {
         return 1.;
     }
     direction = normalize(direction);
@@ -343,7 +352,7 @@ bool GPISMedium::intersectGP(const Ray &ray, GPRealization &gpRealization, doubl
     for (int i = 1; i < marchingNumSamplePoints; ++i) {
         double curV = gpRealization.values[i];
         double curT = ts[i];
-        if (curV * lastV < 0) {
+        if (lastV > 0 && curV < 0) {
             double offset = lastV / (lastV - curV);
             gpRealization.makeIntersection(i, offset);
             t = lerp(lastT, curT, offset);

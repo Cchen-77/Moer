@@ -53,15 +53,17 @@ MeanFunction::MeanFunction(const Json &json) {
 }
 
 Vec3d MeanFunction::dmean_dp(const Point3d &point) const {
-    constexpr double eps = 0.001;
+    constexpr double eps = 1e-6;
 
-    std::array<double, 4> vals = {
+    std::array<double, 6> vals = {
         mean(point + Vec3d(eps, 0., 0.)),
         mean(point + Vec3d(0., eps, 0.)),
         mean(point + Vec3d(0., 0., eps)),
-        mean(point)};
+        mean(point - Vec3d(eps, 0., 0.)),
+        mean(point - Vec3d(0., eps, 0.)),
+        mean(point - Vec3d(0., 0., eps))};
 
-    return Vec3d(vals[0] - vals[3], vals[1] - vals[3], vals[2] - vals[3]) / eps;
+    return Vec3d(vals[0] - vals[3], vals[1] - vals[4], vals[2] - vals[5]) / (2 * eps);
 }
 
 ProceduralMean::ProceduralMean(const Json &json) : MeanFunction(json) {
@@ -81,28 +83,31 @@ TabulatedMean::TabulatedMean(const Json &json) : MeanFunction(json) {
 
     std::string gridFilePath = json.at("file");
     std::string fullGridFilePath = FileUtils::getWorkingDir() + gridFilePath;
-    meanGrid = nanovdb::io::readGrid(fullGridFilePath, meanGridName, 1);
-    if (!meanGrid || meanGrid.gridType() != nanovdb::GridType::Float) {
+    auto _meanGrid = nanovdb::io::readGrid(fullGridFilePath, meanGridName, 1);
+    if (!_meanGrid || _meanGrid.gridType() != nanovdb::GridType::Float) {
         std::cerr << "tabulated mean need a \"mean\" grid with float grid type\n";
         exit(1);
     }
+    meanGrid = nanovdb::convertToDense(*_meanGrid.grid<float>());
     meanFloatGrid = meanGrid.grid<float>();
-    worldBBox = &meanFloatGrid->worldBBox();
-    meanGridAccessor = std::make_shared<nanovdb::DefaultReadAccessor<float>>(meanFloatGrid->getAccessor());
 
     gridShouldBeNormalized = getOptional(json, "grid_should_be_normalized", false);
 }
 
 double TabulatedMean::mean(const Point3d &point) const {
     auto p = invTransformMatrix * point;
+    double normalizeScale = 1.;
     if (gridShouldBeNormalized) {
-        p *= std::max(worldBBox->max()[0] - worldBBox->min()[0], std::max(worldBBox->max()[1] - worldBBox->min()[1], worldBBox->max()[2] - worldBBox->min()[2]));
-        p += Vec3d{worldBBox->min()[0], worldBBox->min()[1], worldBBox->min()[2]};
+        auto &bboxMax = meanFloatGrid->worldBBox().max();
+        auto &bboxMin = meanFloatGrid->worldBBox().min();
+        normalizeScale = std::max(bboxMax[0] - bboxMin[0], std::max(bboxMax[1] - bboxMin[1], bboxMax[2] - bboxMin[2])) / 2;
+        p *= normalizeScale;
+        p += Vec3d{bboxMin[0] + bboxMax[0], bboxMin[1] + bboxMax[1], bboxMin[2] + bboxMax[2]} / 2;
     }
-    p = clamp(p, worldBBox);
-    Point3d index = meanFloatGrid->worldToIndex(p);
-    float res = nanovdb::SampleFromVoxels<nanovdb::DefaultReadAccessor<float>, 1, false>(*meanGridAccessor)(index);
+
+    float res = sampleDenseGrid(*meanFloatGrid, p);
     res *= transformScale;
+    res /= normalizeScale;
     return scale * res + offset;
 }
 
@@ -140,28 +145,26 @@ NonstationaryCovariance::NonstationaryCovariance(const Json &json) {
         std::string localVarianceGridName = getOptional(json, "local_variance_grid_name", std::string("local_variance"));
         std::string gridFilePath = json.at("local_variance");
         std::string fullGridFilePath = FileUtils::getWorkingDir() + gridFilePath;
-        localVarianceGrid = nanovdb::io::readGrid(fullGridFilePath, localVarianceGridName, 1);
-        if (!localVarianceGrid || localVarianceGrid.gridType() != nanovdb::GridType::Float) {
+        auto _localVarianceGrid = nanovdb::io::readGrid(fullGridFilePath, localVarianceGridName, 1);
+        if (!_localVarianceGrid || _localVarianceGrid.gridType() != nanovdb::GridType::Float) {
             std::cerr << "invalid local variance grid!\n";
             exit(1);
         }
+        localVarianceGrid = nanovdb::convertToDense(*_localVarianceGrid.grid<float>());
         localVarianceFloatGrid = localVarianceGrid.grid<float>();
-        localVarianceWorldBBox = &localVarianceFloatGrid->worldBBox();
-        localVarianceGridAccessor = std::make_shared<nanovdb::DefaultReadAccessor<float>>(localVarianceFloatGrid->getAccessor());
     }
 
     {
         std::string correlationGridName = getOptional(json, "correlation_grid_name", std::string("correlation"));
         std::string gridFilePath = json.at("correlation");
         std::string fullGridFilePath = FileUtils::getWorkingDir() + gridFilePath;
-        correlationGrid = nanovdb::io::readGrid(fullGridFilePath, correlationGridName, 1);
-        if (!correlationGrid || correlationGrid.gridType() != nanovdb::GridType::Float) {
+        auto _correlationGrid = nanovdb::io::readGrid(fullGridFilePath, correlationGridName, 1);
+        if (!_correlationGrid || _correlationGrid.gridType() != nanovdb::GridType::Float) {
             std::cerr << "invalid correlation grid!\n";
             exit(1);
         }
+        correlationGrid = nanovdb::convertToDense(*_correlationGrid.grid<float>());
         correlationFloatGrid = correlationGrid.grid<float>();
-        correlationWorldBBox = &correlationFloatGrid->worldBBox();
-        correlationGridAccessor = std::make_shared<nanovdb::DefaultReadAccessor<float>>(correlationFloatGrid->getAccessor());
     }
 
     gridShouldBeNormalized = getOptional(json, "grid_should_be_normalized", false);
@@ -250,15 +253,16 @@ autodiff::dual2nd NonstationaryCovariance::cov(const autodiff::Vector3dual2nd &p
 }
 
 double NonstationaryCovariance::sampleLocalVariance(const Point3d &point) const {
-    Point3d p = invTransformMatrix * point;
+    auto p = invTransformMatrix * point;
+    double normalizeScale = 1.;
     if (gridShouldBeNormalized) {
-        p *= std::max(localVarianceWorldBBox->max()[0] - localVarianceWorldBBox->min()[0],
-                      std::max(localVarianceWorldBBox->max()[1] - localVarianceWorldBBox->min()[1], localVarianceWorldBBox->max()[2] - localVarianceWorldBBox->min()[2]));
-        p += Vec3d{localVarianceWorldBBox->min()[0], localVarianceWorldBBox->min()[1], localVarianceWorldBBox->min()[2]};
+        auto &bboxMax = localVarianceFloatGrid->worldBBox().max();
+        auto &bboxMin = localVarianceFloatGrid->worldBBox().min();
+        p *= std::max(bboxMax[0] - bboxMin[0], std::max(bboxMax[1] - bboxMin[1], bboxMax[2] - bboxMin[2])) / 2;
+        p += Vec3d{bboxMin[0] + bboxMax[0], bboxMin[1] + bboxMax[1], bboxMin[2] + bboxMax[2]} / 2;
     }
-    p = clamp(p, localVarianceWorldBBox);
-    Point3d index = localVarianceFloatGrid->worldToIndex(p);
-    float res = nanovdb::SampleFromVoxels<nanovdb::DefaultReadAccessor<float>, 1, false>(*localVarianceGridAccessor)(index);
+
+    float res = sampleDenseGrid(*localVarianceFloatGrid, p);
     return res;
 }
 
@@ -303,15 +307,16 @@ autodiff::dual2nd NonstationaryCovariance::sampleLocalVariance(const autodiff::V
 }
 
 double NonstationaryCovariance::sampleCorrelation(const Point3d &point) const {
-    Point3d p = invTransformMatrix * point;
+    auto p = invTransformMatrix * point;
+    double normalizeScale = 1.;
     if (gridShouldBeNormalized) {
-        p *= std::max(correlationWorldBBox->max()[0] - correlationWorldBBox->min()[0],
-                      std::max(correlationWorldBBox->max()[1] - correlationWorldBBox->min()[1], correlationWorldBBox->max()[2] - correlationWorldBBox->min()[2]));
-        p += Vec3d{correlationWorldBBox->min()[0], correlationWorldBBox->min()[1], correlationWorldBBox->min()[2]};
+        auto &bboxMax = correlationFloatGrid->worldBBox().max();
+        auto &bboxMin = correlationFloatGrid->worldBBox().min();
+        p *= std::max(bboxMax[0] - bboxMin[0], std::max(bboxMax[1] - bboxMin[1], bboxMax[2] - bboxMin[2])) / 2;
+        p += Vec3d{bboxMin[0] + bboxMax[0], bboxMin[1] + bboxMax[1], bboxMin[2] + bboxMax[2]} / 2;
     }
-    p = clamp(p, correlationWorldBBox);
-    Point3d index = correlationFloatGrid->worldToIndex(p);
-    float res = nanovdb::SampleFromVoxels<nanovdb::DefaultReadAccessor<float>, 1, false>(*correlationFloatGrid)(index);
+
+    float res = sampleDenseGrid(*correlationFloatGrid, p);
     return res;
 }
 

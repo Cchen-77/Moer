@@ -14,6 +14,16 @@ public:
                                 const Intersection &its,
                                 Point2d sample) const override;
 
+    bool sampleDistance1(MediumSampleRecord *mRec,
+                         const Ray &ray,
+                         const Intersection &its,
+                         Point2d sample) const;
+
+    bool sampleDistance2(MediumSampleRecord *mRec,
+                         const Ray &ray,
+                         const Intersection &its,
+                         Point2d sample) const;
+
     virtual Spectrum evalTransmittance(Point3d from,
                                        Point3d dest) const override;
 

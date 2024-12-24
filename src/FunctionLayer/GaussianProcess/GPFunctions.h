@@ -12,6 +12,7 @@
 
 #include <nanovdb/NanoVDB.h>
 #include <nanovdb/util/GridHandle.h>
+#include <nanovdb/examples/benchmark/DenseGrid.h>
 
 #include "GaussianProcessUtils.h"
 
@@ -57,20 +58,10 @@ protected:
     virtual double mean(const Point3d &point) const override;
 
     std::string meanGridName;
-    nanovdb::GridHandle<nanovdb::HostBuffer> meanGrid;
-    const nanovdb::FloatGrid *meanFloatGrid = nullptr;
-    const nanovdb::BBoxR *worldBBox = nullptr;
-    std::shared_ptr<nanovdb::DefaultReadAccessor<float>> meanGridAccessor = nullptr;
+    nanovdb::DenseGridHandle<nanovdb::HostBuffer> meanGrid;
+    nanovdb::DenseGrid<float> *meanFloatGrid = nullptr;
 
     bool gridShouldBeNormalized = false;
-
-    Point3d clamp(Point3d point, const nanovdb::BBoxR *bbox) const {
-        return {
-            std::clamp(point.x, bbox->min()[0], bbox->max()[0]),
-            std::clamp(point.y, bbox->min()[1], bbox->max()[1]),
-            std::clamp(point.z, bbox->min()[2], bbox->max()[2]),
-        };
-    }
 };
 
 class CovarianceFunction {
@@ -159,10 +150,9 @@ protected:
     autodiff::real2nd sampleLocalVariance(const autodiff::Vector3real2nd &point) const;
     autodiff::dual2nd sampleLocalVariance(const autodiff::Vector3dual2nd &point) const;
 
-    nanovdb::GridHandle<nanovdb::HostBuffer> localVarianceGrid;
-    const nanovdb::FloatGrid *localVarianceFloatGrid = nullptr;
-    const nanovdb::BBoxR *localVarianceWorldBBox = nullptr;
-    std::shared_ptr<nanovdb::DefaultReadAccessor<float>> localVarianceGridAccessor;
+    std::string localVarianceGridName;
+    nanovdb::DenseGridHandle<nanovdb::HostBuffer> localVarianceGrid;
+    nanovdb::DenseGrid<float> *localVarianceFloatGrid = nullptr;
 
     Point3d clamp(Point3d point, const nanovdb::BBoxR *bbox) const {
         return {
@@ -179,12 +169,63 @@ protected:
     autodiff::real2nd sampleCorrelation(const autodiff::Vector3real2nd &point) const;
     autodiff::dual2nd sampleCorrelation(const autodiff::Vector3dual2nd &point) const;
 
-    nanovdb::GridHandle<nanovdb::HostBuffer> correlationGrid;
-    const nanovdb::FloatGrid *correlationFloatGrid = nullptr;
-    const nanovdb::BBoxR *correlationWorldBBox = nullptr;
-    std::shared_ptr<nanovdb::DefaultReadAccessor<float>> correlationGridAccessor;
+    std::string correlationGridName;
+    nanovdb::DenseGridHandle<nanovdb::HostBuffer> correlationGrid;
+    nanovdb::DenseGrid<float> *correlationFloatGrid = nullptr;
 
     bool gridShouldBeNormalized = false;
 
     std::shared_ptr<CovarianceFunction> stationaryCovariance;
 };
+
+inline float sampleDenseGrid(const nanovdb::DenseGrid<float> &denseGrid, const Point3d &p) {
+    double eps = 1e-8;
+    Point3d point = p;
+
+    if (!denseGrid.worldBBox().isInside({p[0], p[1], p[2]})) {
+        auto bbox = denseGrid.worldBBox();
+        point = {std::clamp(point.x, bbox.min()[0] + eps, bbox.max()[0] - eps),
+                 std::clamp(point.y, bbox.min()[1] + eps, bbox.max()[1] - eps),
+                 std::clamp(point.z, bbox.min()[2] + eps, bbox.max()[2] - eps)};
+    }
+
+    Point3d index = denseGrid.worldToIndex(point);
+    auto &indexMax = denseGrid.indexBBox().max();
+    auto &indexMin = denseGrid.indexBBox().min();
+
+    int x0 = fm::floor(index[0]);
+    int y0 = fm::floor(index[1]);
+    int z0 = fm::floor(index[2]);
+
+    double u = fm::abs(x0 + 0.5 - index[0]);
+    double v = fm::abs(y0 + 0.5 - index[1]);
+    double w = fm::abs(z0 + 0.5 - index[2]);
+
+    double one_minus_u = 1.0 - u;
+    double one_minus_v = 1.0 - v;
+    double one_minus_w = 1.0 - w;
+
+    auto getVoxel = [&](int x, int y, int z) -> float {
+        return denseGrid.getValue({std::clamp(x, indexMin[0], indexMax[0]),
+                                   std::clamp(y, indexMin[1], indexMax[1]),
+                                   std::clamp(z, indexMin[2], indexMax[2])});
+    };
+
+    float c000 = getVoxel(x0, y0, z0);
+    float c100 = getVoxel((index[0] - x0 > 0.5) ? x0 + 1 : x0 - 1, y0, z0);
+    float c010 = getVoxel(x0, (index[1] - y0 > 0.5) ? y0 + 1 : y0 - 1, z0);
+    float c001 = getVoxel(x0, y0, (index[2] - z0 > 0.5) ? z0 + 1 : z0 - 1);
+    float c110 = getVoxel((index[0] - x0 > 0.5) ? x0 + 1 : x0 - 1, (index[1] - y0 > 0.5) ? y0 + 1 : y0 - 1, z0);
+    float c101 = getVoxel((index[0] - x0 > 0.5) ? x0 + 1 : x0 - 1, y0, (index[2] - z0 > 0.5) ? z0 + 1 : z0 - 1);
+    float c011 = getVoxel(x0, (index[1] - y0 > 0.5) ? y0 + 1 : y0 - 1, (index[2] - z0 > 0.5) ? z0 + 1 : z0 - 1);
+    float c111 = getVoxel((index[0] - x0 > 0.5) ? x0 + 1 : x0 - 1, (index[1] - y0 > 0.5) ? y0 + 1 : y0 - 1, (index[2] - z0 > 0.5) ? z0 + 1 : z0 - 1);
+
+    return one_minus_u * one_minus_v * one_minus_w * c000 +
+           u * one_minus_v * one_minus_w * c100 +
+           one_minus_u * v * one_minus_w * c010 +
+           one_minus_u * one_minus_v * w * c001 +
+           u * one_minus_v * w * c101 +
+           one_minus_u * v * w * c011 +
+           u * v * one_minus_w * c110 +
+           u * v * w * c111;
+}
